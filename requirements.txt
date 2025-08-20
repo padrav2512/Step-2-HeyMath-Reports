@@ -11,3 +11,5 @@ requests>=2.31
 
 # --- Utilities ---
 python-dateutil>=2.9
+
+altair>=5.3
