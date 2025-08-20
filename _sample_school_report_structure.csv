@@ -1,0 +1,9 @@
+sheet,n_preview_rows,n_columns,columns_preview
+TU,5,11,"Name, Classes Handled, No of logins, No of Lessons Accessed, No of Assignments Assigned, Unnamed: 5, Usage Criteria (4 Weeks), Exemplary, Good, Satisfactory, Potential to improve"
+SU,5,20,"Class, No of Students, No of  Logins, No of Lessons Accessed, Quiz, Worksheet, Prasso, Reading, Unnamed: 8, Unnamed: 9, Unnamed: 10, Unnamed: 11, Unnamed: 12, Unnamed: 13, Hold/Live, (All), Unnamed: 16, Unnamed: 17, Unnamed: 18, Unnamed: 19"
+LevelWise,5,3,"Level, ï»¿Class, No of Lessons Accessed"
+Assignments Details,5,22,"ï»¿""Assigned On"", Title, Hold/Live, Topic, Mode Final, Mode, Teacher, Assigned To, Level, Start Date, Completed/Ongoing, Due Date, Reports, Unnamed: 13, Unnamed: 14, Unnamed: 15, Hold/Live.1, (All), Unnamed: 18, Unnamed: 19"
+Assignments Summary,5,9,"Level, Quiz Test, Quiz Standard Practice, Worksheet Question Bank, Reading, Total, Unnamed: 6, Unnamed: 7, Note that this does not belong to the same school branch. It is only to show a sample format"
+Assignments Submission Summary,5,11,"Title, Topic, Mode, Teacher, AssignedTo, StartDate, DueDate, NotAccessed%, OnlyAccessed%, Submitted%, Note that this does not belong to the same school branch. It is only to show a sample format"
+Class 3 Stud-wise Report,5,10,"Student Name, Class, Lessons Accessed, Quiz Received, Quiz Accessed / Submitted, Worksheet Received, Worksheet Accessed / Submitted, Prasso Accessed / Mastered, Reading Received, Reading Accessed / Submitted"
+Class 3A  Stud Quiz Consolidati,5,9,"Student Name, MONEY, Money, Money.1, Money.2, Measurement, Average Percentage Score, # Quiz Received, # Quiz Submitted"

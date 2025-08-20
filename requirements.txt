@@ -1,0 +1,13 @@
+# --- Core UI ---
+streamlit>=1.36,<1.42
+
+# --- Data processing ---
+pandas>=2.2
+numpy<2
+openpyxl>=3.1
+
+# --- HTTP ---
+requests>=2.31
+
+# --- Utilities ---
+python-dateutil>=2.9

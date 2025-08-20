@@ -1,0 +1,16 @@
+target_sheet,target_column,suggested_source_column,source_csv,aggregate,transform
+SU,Class,LEVEL_DISPLAY_NAME,School Logins Report,,sort on LEVEL
+SU,No of Students,TOTAL_STUDENTS,School Logins Report,,
+SU,No of Logins,TOTAL_LOGINS,School Logins Report,,
+SU,No of Lessons Accessed,LESSONS_ACCESSED,School Lessons Usage Report,,Match the LEVEL in School Logins Report
+SU,Quiz,ONGOING_AQC,School Assignments Usage Report,,Match the LEVEL in School Logins Report
+SU,Worksheet,ONGOING_WORKSHEET,School Assignments Usage Report,,Match the LEVEL in School Logins Report
+SU,Prasso,ONGOING_PRASSO,School Assignments Usage Report,,Match the LEVEL in School Logins Report
+SU,Reading,ONGOING_READING,School Assignments Usage Report,,Match the LEVEL in School Logins Report
+TU,Name,userName,All Teachers Usage Logins,,
+TU,No of logins,logins,All Teachers Usage Logins,,
+TU,No of Lessons Accessed,lesson,All Teachers Usage Logins,,
+TU,No of Assignments Assigned,assessment,All Teachers Usage Logins,,
+Levelwise,Level,LEVEL,Level Lessons Usage Report,sort by SORT_ORDER ,
+Levelwise,Class,LEVEL_DISPLAY_NAME,Level Lessons Usage Report,,
+Levelwise,No of Lessons Accessed,LESSONS_ACCESSED,Level Lessons Usage Report,,
