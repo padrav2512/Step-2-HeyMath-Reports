@@ -1,4 +1,4 @@
-# heymath_su_builder.py (Post changes in SU with detailed tables display for onHold, Demo tecaher, Assig to individuals/bands)
+# heymath_su_builder_focusonsu_FINAL.py
 # ---------------------------------------------------------------------
 # HeyMath! School Report Builder – compact UI, robust charts, ASR & TU
 # ---------------------------------------------------------------------
@@ -99,6 +99,31 @@ def try_load_demo_book_bytes(default_path="Demo_ids_classesHandled.xlsx"):
     except Exception:
         return None
 
+def _coerce_metric_key(sel, cols_set):
+    """Return a string column name present in cols_set, or None."""
+    if isinstance(sel, str):
+        return sel if sel in cols_set else None
+    if isinstance(sel, dict):
+        # Common dict shapes: {"col": "...", "name": "...", "value": "...", "key": "..."}
+        for k in ("col", "name", "value", "key"):
+            v = sel.get(k)
+            if isinstance(v, str) and v in cols_set:
+                return v
+        # Last resort: try any string value from the dict
+        for v in sel.values():
+            if isinstance(v, str) and v in cols_set:
+                return v
+        return None
+    # Fallback: stringify
+    try:
+        s = str(sel)
+        return s if s in cols_set else None
+    except Exception:
+        return None
+
+def _cols_str_set(df):
+    return set(map(str, df.columns)) if isinstance(df, pd.DataFrame) else set()
+
 
 # ------------------------ Chart helpers ------------------------------
 # def render_altair(chart, title=None):
@@ -172,6 +197,7 @@ def render_altair(chart, title=None):
             # text=alt.Text(f"{y}:Q", format=".0f"),
         # )
     # return (bars + text).configure_axis(labelLimit=160, grid=True, gridColor="#f2f2f2")
+    
 def bar_with_labels(df, x, y, title=None, horizontal=False, height=320, width=900,
                     category_sort=None, bar_size=None):
     """Altair bar chart with integer axis & value labels (Altair v5 safe)."""
@@ -1436,92 +1462,79 @@ with tab_zip:
                 if allow:
                     su_view = su_view[su_view["Class"].astype(str).str.lower().isin(allow)]
             # mode == "All" -> no filter
-
-        # Render table + chart
+        # --- SU TABLE (show first) ---
         if isinstance(su_view, pd.DataFrame) and not su_view.empty:
-            center_table(su_view, key="zip_su_table")
-            metrics=[c for c in ["No of Lessons Accessed","No of Students","No of Logins","Quiz","Worksheet","Prasso","Reading"] if c in su_view.columns]
-            if metrics:
-                m=st.selectbox("Chart metric", metrics, key="su_metric_zip")
-                topn = su_view.copy(); topn = add_class_sort(topn, "Class"); topn[m]=pd.to_numeric(topn[m], errors="coerce").fillna(0).astype(int)
-                render_altair(bar_with_labels(topn, x="Class", y=m, height=360, width=900, category_sort="_sort"), "SU chart")
+            center_table(su_view, key="zip_su_tbl")
+        else:
+            st.info("No SU data to show yet. Upload a ZIP and click Build.")
+        # don't st.stop(); allow the chart/info below if you prefer
 
-            # # === Detail tables (grouped, comma-separated) ===
-            # # det = det_view or {}
-            # # _df_ib = det.get("indiv_bands", pd.DataFrame())
-            # # _df_t  = det.get("demo_t", pd.DataFrame())
-            # # _df_s  = det.get("demo_s", pd.DataFrame())
-            # # _df_h  = det.get("hold", pd.DataFrame())
-            
-            # det = det_view or {}
-            # _df_ib = _clean_detail_table(det.get("indiv_bands", pd.DataFrame()), drop_mode=True)  # <— hide Mode
-            # _df_t  = _clean_detail_table(det.get("demo_t", pd.DataFrame()))
-            # _df_s  = _clean_detail_table(det.get("demo_s", pd.DataFrame()))
-            # _df_h  = _clean_detail_table(det.get("hold",   pd.DataFrame()))
+        # --- metric picker (string-only) ---
+        cols_set = _cols_str_set(su_view)
+        metrics = [c for c in ["No of Lessons Accessed","No of Students","No of Logins","Quiz","Worksheet","Prasso","Reading"] if c in cols_set]
+        m_sel = st.selectbox("Chart metric", metrics, index=0 if metrics else None, key="su_metric_zip")
+        m = _coerce_metric_key(m_sel, cols_set)
 
-            # # …and keep the same rendering + download buttons, but feed the cleaned frames:
-            # if not _df_ib.empty:
-                # st.subheader("Assignments to Individuals & Bands")
-                # center_table(_df_ib, key="zip_su_tbl_indiv")
-                # _dl(_df_ib, "assignments_to_individuals_bands", "zip_indiv")
+        if isinstance(su_view, pd.DataFrame) and not su_view.empty and m:
+            plot_df = su_view[["Class", m]].copy()
+            plot_df = add_class_sort(plot_df, "Class")
+            plot_df[m] = pd.to_numeric(plot_df[m], errors="coerce").fillna(0).astype(int)
 
-            # if not _df_t.empty:
-                # st.subheader("Assignments issued by demo teachers")
-                # center_table(_df_t, key="zip_su_tbl_demo_t")
-                # _dl(_df_t, "assignments_by_demo_teachers", "zip_demo_t")
+            nrows = len(plot_df)
+            dyn_h = max(260, min(26 * max(nrows, 1) + 60, 1400))
 
-            # if not _df_s.empty:
-                # st.subheader("Assignments issued to demo students")
-                # center_table(_df_s, key="zip_su_tbl_demo_s")
-                # _dl(_df_s, "assignments_to_demo_students", "zip_demo_s")
+            chart = bar_with_labels(
+                plot_df, x="Class", y=m,
+                height=dyn_h, width=900, category_sort="_sort", bar_size=18
+            )
+            render_altair(chart, "SU chart")
+        else:
+            st.info("No SU data for the selected metric.")
 
-            # if not _df_h.empty:
-                # st.subheader("Assignments on Hold")
-                # center_table(_df_h, key="zip_su_tbl_hold")
-                # _dl(_df_h, "assignments_on_hold", "zip_hold")
-            # === Detail tables (grouped, comma-separated) ===
-            det = det_view or {}
-            _df_ib = _clean_detail_table(det.get("indiv_bands", pd.DataFrame()), drop_mode=True)  # hide Mode
-            _df_t  = _clean_detail_table(det.get("demo_t", pd.DataFrame()))
-            _df_s  = _clean_detail_table(det.get("demo_s", pd.DataFrame()))
-            _df_h  = _clean_detail_table(det.get("hold",   pd.DataFrame()))
+ 
+        # === Detail tables (grouped, comma-separated) ===
+        det = det_view or {}
+        _df_ib = _clean_detail_table(det.get("indiv_bands", pd.DataFrame()), drop_mode=True)  # hide Mode
+        _df_t  = _clean_detail_table(det.get("demo_t", pd.DataFrame()))
+        _df_s  = _clean_detail_table(det.get("demo_s", pd.DataFrame()))
+        _df_h  = _clean_detail_table(det.get("hold",   pd.DataFrame()))
 
-            # define helper BEFORE calls
-            def _dl(df: pd.DataFrame, base: str, key_prefix: str):
-                if df is not None and not df.empty:
-                    _csv = _df_to_csv_bytes(df)
-                    st.download_button("Download CSV", _csv,
-                                       file_name=f"{base}.csv", mime="text/csv",
-                                       key=f"{key_prefix}_csv")
-                    try:
-                        _xlsx = _df_to_xlsx_bytes(df, sheet_name=base)
-                        st.download_button("Download XLSX", _xlsx,
-                                           file_name=f"{base}.xlsx",
-                                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                           key=f"{key_prefix}_xlsx")
-                    except Exception:
-                        pass
+        # define helper BEFORE calls
+        def _dl(df: pd.DataFrame, base: str, key_prefix: str):
+            if df is not None and not df.empty:
+                _csv = _df_to_csv_bytes(df)
+                st.download_button("Download CSV", _csv,
+                                   file_name=f"{base}.csv", mime="text/csv",
+                                   key=f"{key_prefix}_csv")
+                try:
+                    _xlsx = _df_to_xlsx_bytes(df, sheet_name=base)
+                    st.download_button("Download XLSX", _xlsx,
+                                       file_name=f"{base}.xlsx",
+                                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                       key=f"{key_prefix}_xlsx")
+                except Exception:
+                    pass
 
-            # render tables once (after helper is defined)
-            if not _df_ib.empty:
-                st.subheader("Assignments to Individuals & Bands")
-                center_table(_df_ib, key="zip_su_tbl_indiv")
-                _dl(_df_ib, "assignments_to_individuals_bands", "zip_indiv")
+        # render tables once (after helper is defined)
+        if not _df_ib.empty:
+            st.subheader("Assignments to Individuals & Bands")
+            center_table(_df_ib, key="zip_su_tbl_indiv")
+            _dl(_df_ib, "assignments_to_individuals_bands", "zip_indiv")
 
-            if not _df_t.empty:
-                st.subheader("Assignments issued by demo teachers")
-                center_table(_df_t, key="zip_su_tbl_demo_t")
-                _dl(_df_t, "assignments_by_demo_teachers", "zip_demo_t")
+        if not _df_t.empty:
+            st.subheader("Assignments issued by demo teachers")
+            center_table(_df_t, key="zip_su_tbl_demo_t")
+            _dl(_df_t, "assignments_by_demo_teachers", "zip_demo_t")
 
-            if not _df_s.empty:
-                st.subheader("Assignments issued to demo students")
-                center_table(_df_s, key="zip_su_tbl_demo_s")
-                _dl(_df_s, "assignments_to_demo_students", "zip_demo_s")
+        if not _df_s.empty:
+            st.subheader("Assignments issued to demo students")
+            center_table(_df_s, key="zip_su_tbl_demo_s")
+            _dl(_df_s, "assignments_to_demo_students", "zip_demo_s")
 
-            if not _df_h.empty:
-                st.subheader("Assignments on Hold")
-                center_table(_df_h, key="zip_su_tbl_hold")
-                _dl(_df_h, "assignments_on_hold", "zip_hold")
+        if not _df_h.empty:
+            st.subheader("Assignments on Hold")
+            center_table(_df_h, key="zip_su_tbl_hold")
+            _dl(_df_h, "assignments_on_hold", "zip_hold")
 
      
     with tab2:
@@ -1709,37 +1722,59 @@ with tab_zip:
             center_table(lv_view, key="lv_tbl_zip")
 
             # === one chart per Level (uses filtered lv_view) ===
-            if {"Level", "Class", "No of Lessons Accessed"}.issubset(lv_view.columns):
+            # if {"Level", "Class", "No of Lessons Accessed"}.issubset(lv_view.columns):
+                # def _lvl_key(s):
+                    # m = re.search(r"\d+", str(s))
+                    # return (int(m.group()) if m else 999, str(s))
+                # levels = sorted(lv_view["Level"].dropna().unique().tolist(), key=_lvl_key)
+
+                # for lvl in levels:
+                    # sub = lv_view[lv_view["Level"] == lvl][["Class", "No of Lessons Accessed"]].copy()
+                    # if sub.empty:
+                        # continue
+                    # sub = add_class_sort(sub, "Class")
+                    # sub["No of Lessons Accessed"] = (
+                        # pd.to_numeric(sub["No of Lessons Accessed"], errors="coerce").fillna(0).astype(int)
+                    # )
+                    # dyn_h = max(260, min(28 * len(sub) + 80, 900))
+                    # st.markdown(f"#### {lvl}")
+                    # render_altair(
+                        # bar_with_labels(
+                            # sub, x="Class", y="No of Lessons Accessed",
+                            # height=dyn_h, width=900, category_sort="_sort", bar_size=18
+                        # ),
+                        # f"Levelwise chart — {lvl}",
+                    # )
+                # table already shown above...
+
+            # one chart per Level (uses lv_view after filters)
+            if {"Level","Class","No of Lessons Accessed"}.issubset(lv_view.columns):
                 def _lvl_key(s):
-                    m = re.search(r"\d+", str(s))
-                    return (int(m.group()) if m else 999, str(s))
+                    m_ = re.search(r"\d+", str(s))
+                    return (int(m_.group()) if m_ else 999, str(s))
                 levels = sorted(lv_view["Level"].dropna().unique().tolist(), key=_lvl_key)
 
                 for lvl in levels:
-                    sub = lv_view[lv_view["Level"] == lvl][["Class", "No of Lessons Accessed"]].copy()
+                    sub = lv_view[lv_view["Level"] == lvl][["Class","No of Lessons Accessed"]].copy()
                     if sub.empty:
                         continue
                     sub = add_class_sort(sub, "Class")
-                    sub["No of Lessons Accessed"] = (
-                        pd.to_numeric(sub["No of Lessons Accessed"], errors="coerce").fillna(0).astype(int)
-                    )
-                    dyn_h = max(260, min(28 * len(sub) + 80, 900))
-                    st.markdown(f"#### {lvl}")
-                    render_altair(
-                        bar_with_labels(
-                            sub, x="Class", y="No of Lessons Accessed",
-                            height=dyn_h, width=900, category_sort="_sort", bar_size=18
-                        ),
-                        f"Levelwise chart — {lvl}",
-                    )
-                    
+                    sub["No of Lessons Accessed"] = pd.to_numeric(sub["No of Lessons Accessed"], errors="coerce").fillna(0).astype(int)
 
+                    dyn_h = max(260, min(28 * len(sub) + 80, 900))   # compute INSIDE loop
+
+                    st.markdown(f"#### {lvl}")
+                    chart = bar_with_labels(
+                        sub, x="Class", y="No of Lessons Accessed",
+                        height=dyn_h, width=900, category_sort="_sort", bar_size=18
+                    )
+                    render_altair(chart, f"Levelwise chart — {lvl}")
 
             else:
                 st.info("Levelwise needs columns: Level, Class, No of Lessons Accessed.")
 
-            nrows = len(tmp)
-            dyn_h = max(320, min(28 * max(nrows, 1) + 80, 1200))
+            # nrows = len(tmp)
+            # dyn_h = max(320, min(28 * max(nrows, 1) + 80, 1200))
 
             
 
@@ -1878,13 +1913,25 @@ with tab_csv:
             center_table(tu, key="tu_tbl_csv")
             t_opts=[c for c in ["No of Assignments Assigned","No of Lessons Accessed","No of logins"] if c in tu.columns]
             if t_opts and "Name" in tu.columns:
-                tm=st.selectbox("Metric", t_opts, key="tu_metric_csv")
-                by = (tu.groupby("Name")[tm].sum(numeric_only=True).sort_values(ascending=False).head(12)).reset_index()
-                by[tm]=pd.to_numeric(by[tm], errors="coerce").fillna(0).astype(int)
-                render_altair(bar_with_labels(by, x="Name", y=tm, horizontal=True, height=460, width=900), "TU chart")
+                # tm=st.selectbox("Metric", t_opts, key="tu_metric_csv")
+                # by = (tu.groupby("Name")[tm].sum(numeric_only=True).sort_values(ascending=False).head(12)).reset_index()
+                # by[tm]=pd.to_numeric(by[tm], errors="coerce").fillna(0).astype(int)
+                # render_altair(bar_with_labels(by, x="Name", y=tm, horizontal=True, height=460, width=900), "TU chart")
+                # safe, string-only metric selection
+                cols_set = _cols_str_set(tu)
+                tm_sel = st.selectbox("Metric", t_opts, index=0 if t_opts else None, key="tu_metric_csv")
+                tm = _coerce_metric_key(tm_sel, cols_set)
+
+                if tm:
+                    by = (tu.groupby("Name")[tm].sum(numeric_only=True).sort_values(ascending=False).head(12)).reset_index()
+                    by[tm] = pd.to_numeric(by[tm], errors="coerce").fillna(0).astype(int)
+                    render_altair(bar_with_labels(by, x="Name", y=tm, horizontal=True, height=460, width=900), "TU chart")
+                else:
+                    st.info("Pick a metric available in TU to draw the chart.")
+
         else:
             st.info("Upload Teachers Usage (optional) and click Build to see TU.")
-
+    
     with tab3:
         lv = st.session_state.get("zip_lv", pd.DataFrame())
         if not lv.empty:
