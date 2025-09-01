@@ -1,4 +1,4 @@
-# heymath_su_builder.py
+# heymath_su_builder.py (Post changes in SU with detailed tables display for onHold, Demo tecaher, Assig to individuals/bands)
 # ---------------------------------------------------------------------
 # HeyMath! School Report Builder – compact UI, robust charts, ASR & TU
 # ---------------------------------------------------------------------
@@ -18,20 +18,34 @@ st.set_page_config(
 )
 alt.data_transformers.disable_max_rows()  # allow large frames
 
+# st.markdown("""
+# <style>
+# /* Narrow page & reduce top padding */
+# .block-container {max-width: 1100px; padding-top: .6rem; padding-bottom: 1rem;}
+# /* Tighter headings */
+# h1, h2, h3 {margin-top: .2rem;}
+# /* Compact radio spacing */
+# div.row-widget.stRadio > div {gap: .75rem}
+# /* Strong primary button */
+# button[kind="primary"]{font-weight:600;padding:.6rem 1rem;border-radius:.6rem}
+# /* Center tables without going full width */
+# .hm-narrow {max-width: 900px; margin: 0 auto;}
+# </style>
+# """, unsafe_allow_html=True)
+
 st.markdown("""
 <style>
-/* Narrow page & reduce top padding */
-.block-container {max-width: 1100px; padding-top: .6rem; padding-bottom: 1rem;}
-/* Tighter headings */
-h1, h2, h3 {margin-top: .2rem;}
-/* Compact radio spacing */
-div.row-widget.stRadio > div {gap: .75rem}
-/* Strong primary button */
-button[kind="primary"]{font-weight:600;padding:.6rem 1rem;border-radius:.6rem}
-/* Center tables without going full width */
-.hm-narrow {max-width: 900px; margin: 0 auto;}
+/* Page width + comfortable top padding (prevents title clipping) */
+.block-container {max-width: 1100px; padding-top: 1.25rem; padding-bottom: 1rem;}
+
+/* Headings: slight margin + taller line-height */
+h1, h2, h3 { margin-top: .4rem; line-height: 1.2; }
+
+/* Center the first H1 on the page (your st.title) */
+.block-container h1:first-child { text-align: center; }
 </style>
 """, unsafe_allow_html=True)
+
 
 # ------------------------ Utilities ----------------------------------
 def norm(s): return re.sub(r"\s+"," ", str(s or "")).strip().lower()
@@ -78,32 +92,119 @@ def add_class_sort(df, class_col="Class", out_col="_sort"):
     d[out_col]=d[class_col].apply(class_sort_key).apply(to_num)
     return d
 
-# ------------------------ Chart helpers ------------------------------
-def render_altair(chart, tag="chart"):
-    """Always render the chart or show the exact error from Altair."""
+def try_load_demo_book_bytes(default_path="Demo_ids_classesHandled.xlsx"):
     try:
-        st.altair_chart(chart, use_container_width=True)
-    except Exception as e:
-        st.warning(f"{tag}: Altair failed ({type(e).__name__}). Error below; showing no chart.")
-        st.exception(e)
+        with open(default_path, "rb") as f:
+            return f.read()
+    except Exception:
+        return None
 
+
+# ------------------------ Chart helpers ------------------------------
+# def render_altair(chart, title=None):
+    # """Render an Altair chart only if it has rows; otherwise do nothing."""
+    # if chart is None:
+        # return
+
+    # def _rowcount(c):
+        # try:
+            # # layered charts
+            # if hasattr(c, "layer") and c.layer:
+                # return sum(_rowcount(l) for l in c.layer)
+            # # simple charts
+            # if hasattr(c, "data") and c.data is not alt.Undefined and c.data is not None:
+                # return len(c.data)
+        # except Exception:
+            # pass
+        # return 0
+
+    # if _rowcount(chart) == 0:
+        # return  # <- no fallback text anymore
+    # st.altair_chart(chart, use_container_width=True)
+
+def render_altair(chart, title=None):
+    if chart is None:
+        return
+    st.altair_chart(chart, use_container_width=True)
+
+
+
+# def bar_with_labels(df, x, y, title=None, horizontal=False, height=320, width=900,
+                    # category_sort=None, bar_size=None):
+    # """Altair bar chart with integer axis & value labels (Altair v5 safe).
+       # category_sort: None = sort by value; otherwise name of a column to sort by.
+       # bar_size: fixed pixel width for bars (useful when few categories)."""
+    # df = df.copy()
+    # if x not in df.columns or y not in df.columns:
+        # return alt.Chart(pd.DataFrame({"msg":["No data"]})).mark_text().encode(text="msg:N")
+    # df = df[df[x].notna()]
+    # df[y] = pd.to_numeric(df[y], errors="coerce").fillna(0)
+
+    # sort_obj = alt.SortField(field=category_sort, order="ascending") if category_sort else ('-x' if horizontal else '-y')
+    # axis_q = alt.Axis(tickMinStep=1, format=".0f")
+    # base = alt.Chart(df).properties(width=width, height=height)
+    # if title: base = base.properties(title=title)
+
+    # mark_kwargs = {}
+    # if bar_size is not None:
+        # mark_kwargs["size"] = bar_size
+
+    # if horizontal:
+        # bars = base.mark_bar(**mark_kwargs).encode(
+            # y=alt.Y(f"{x}:N", sort=sort_obj),
+            # x=alt.X(f"{y}:Q", axis=axis_q),
+            # tooltip=[x, y],
+        # )
+        # text = base.mark_text(align="left", dx=3).encode(
+            # y=alt.Y(f"{x}:N", sort=sort_obj),
+            # x=alt.X(f"{y}:Q"),
+            # text=alt.Text(f"{y}:Q", format=".0f"),
+        # )
+    # else:
+        # bars = base.mark_bar(**mark_kwargs).encode(
+            # x=alt.X(f"{x}:N", sort=sort_obj),
+            # y=alt.Y(f"{y}:Q", axis=axis_q),
+            # tooltip=[x, y],
+        # )
+        # text = base.mark_text(align="center", dy=-5).encode(
+            # x=alt.X(f"{x}:N", sort=sort_obj),
+            # y=alt.Y(f"{y}:Q"),
+            # text=alt.Text(f"{y}:Q", format=".0f"),
+        # )
+    # return (bars + text).configure_axis(labelLimit=160, grid=True, gridColor="#f2f2f2")
 def bar_with_labels(df, x, y, title=None, horizontal=False, height=320, width=900,
                     category_sort=None, bar_size=None):
-    """Altair bar chart with integer axis & value labels (Altair v5 safe).
-       category_sort: None = sort by value; otherwise name of a column to sort by.
-       bar_size: fixed pixel width for bars (useful when few categories)."""
-    df = df.copy()
-    if x not in df.columns or y not in df.columns:
-        return alt.Chart(pd.DataFrame({"msg":["No data"]})).mark_text().encode(text="msg:N")
-    df = df[df[x].notna()]
-    df[y] = pd.to_numeric(df[y], errors="coerce").fillna(0)
+    """Altair bar chart with integer axis & value labels (Altair v5 safe)."""
+    # normalize df
+    if isinstance(df, pd.DataFrame):
+        d = df.copy()
+    elif df is None:
+        d = pd.DataFrame()
+    else:
+        d = pd.DataFrame(df)
+
+    # if required columns missing / empty → render nothing
+    if x not in d.columns or y not in d.columns:
+        return None
+    d = d[d[x].notna()]
+    if d.empty:
+        return None
+
+    d[y] = pd.to_numeric(d[y], errors="coerce")
+    if d[y].isna().all():
+        return None
+    d[y] = d[y].fillna(0)
+
+    # if a custom sort column was requested but doesn't exist, ignore it
+    if category_sort and category_sort not in d.columns:
+        category_sort = None
 
     sort_obj = alt.SortField(field=category_sort, order="ascending") if category_sort else ('-x' if horizontal else '-y')
     axis_q = alt.Axis(tickMinStep=1, format=".0f")
-    base = alt.Chart(df).properties(width=width, height=height)
-    if title: base = base.properties(title=title)
+    base = alt.Chart(d).properties(width=width, height=height)
+    if title:
+        base = base.properties(title=title)
 
-    # bar thickness (optional)
     mark_kwargs = {}
     if bar_size is not None:
         mark_kwargs["size"] = bar_size
@@ -132,8 +233,17 @@ def bar_with_labels(df, x, y, title=None, horizontal=False, height=320, width=90
         )
     return (bars + text).configure_axis(labelLimit=160, grid=True, gridColor="#f2f2f2")
 
-def center_table(df: pd.DataFrame, height=420, key=None):
-    st.dataframe(df.reset_index(drop=True), height=height, use_container_width=True, key=key)
+# def center_table(df: pd.DataFrame, height=420, key=None):
+    # st.dataframe(df.reset_index(drop=True), height=height, use_container_width=True, key=key)
+def center_table(df: pd.DataFrame, key=None, max_rows_visible: int = 12):
+    """Display a dataframe with a height that fits its row count (no ghost blanks)."""
+    d = df.reset_index(drop=True)
+    # ~34px per row, ~38px header, ~12px padding
+    row_h, header_h, pad = 34, 38, 12
+    rows = max(1, len(d))
+    vis = min(rows, max_rows_visible)
+    height = header_h + pad + row_h * vis
+    st.dataframe(d, height=int(height), use_container_width=True, key=key)
 
 def compact_options_form(prefix_key="csv", default_mode="Active (default)"):
     cols = st.columns([3,1])
@@ -328,16 +438,13 @@ def build_su(a_df, l_df, g_df):
     return su[cols]
 
 def build_tu(teachers_df: pd.DataFrame | None) -> pd.DataFrame:
-    """
-    TU builder that works with totals OR row-per-event files.
-    Falls back to counting rows when no numeric totals exist.
-    """
+    """TU builder that works with totals OR row-per-event files.
+    Falls back to counting rows when no numeric totals exist."""
     if teachers_df is None or teachers_df.empty:
         return pd.DataFrame(columns=["Name","No of logins","No of Lessons Accessed","No of Assignments Assigned"])
 
     df = teachers_df.copy()
 
-    # case-insensitive picker
     def pick(*alts):
         for a in alts:
             if a in df.columns: return a
@@ -368,7 +475,6 @@ def build_tu(teachers_df: pd.DataFrame | None) -> pd.DataFrame:
 
     direct = tmp.groupby(name_col, as_index=False).sum(numeric_only=True)
 
-    # Fallbacks by counting rows if totals look empty
     need_fb_logins  = (logins_col is None)  or (totals.get(logins_col,0)==0)
     need_fb_lessons = (lessons_col is None) or (totals.get(lessons_col,0)==0)
     need_fb_assigns = (assigns_col is None) or (totals.get(assigns_col,0)==0)
@@ -418,6 +524,128 @@ def build_tu(teachers_df: pd.DataFrame | None) -> pd.DataFrame:
 
     return direct[["Name","No of logins","No of Lessons Accessed","No of Assignments Assigned"]].sort_values("Name", kind="stable")
 
+def build_tu_enhanced(
+    teachers_df: pd.DataFrame | None,
+    t_map: dict[str, dict[str, pd.DataFrame]] | None,
+    include_hold: bool = False,
+    demo_teachers: set | None = None,
+    classes_map: dict | None = None,     # <— NEW
+) -> pd.DataFrame:
+    """
+    Output:
+      Name | Is Demo Teacher | Classes Handled | No of logins | No of Lessons Accessed |
+      No of Assignments Assigned | Quiz | Worksheet | Prasso | Reading
+    - Merges Teachers Usage CSV totals (via build_tu) with counts from Teacher*Assignment files.
+    - Adds userId (if present in Teachers Usage) and maps to Classes Handled via classes_map.
+    """
+    classes_map = {str(k).strip().lower(): str(v).strip() for k, v in (classes_map or {}).items()}
+    demo_set = {str(s).strip().lower() for s in (demo_teachers or set())}
+
+    # 1) Base from Teachers Usage CSV (your tolerant builder)
+    base = build_tu(teachers_df)  # may be empty
+
+    # Grab userId per teacher name if available
+    id_map = pd.DataFrame()
+    if teachers_df is not None and not teachers_df.empty:
+        name_col = pick_col(teachers_df, "Name","userName","username","Teacher","Teacher Name","User")
+        id_col   = pick_col(teachers_df, "userId","user_id","User ID","userid")
+        if name_col:
+            id_map = teachers_df[[name_col] + ([id_col] if id_col else [])].copy()
+            id_map[name_col] = id_map[name_col].astype(str).str.strip()
+            if id_col:
+                id_map[id_col] = id_map[id_col].astype(str).str.strip()
+            id_map = id_map.dropna(subset=[name_col]).drop_duplicates(subset=[name_col], keep="first")
+
+    # 2) Counts from Teacher*Assignment files
+    from collections import defaultdict
+    per = defaultdict(lambda: {"Quiz":0, "Worksheet":0, "Prasso":0, "Reading":0})
+
+    for kind, m in (t_map or {}).items():
+        if not m: continue
+        for _klass, df in m.items():
+            if df is None or df.empty: continue
+            tcol = pick_col(df, "teacher","Teacher","Teacher Name","username","userName","Name","user_id","User ID")
+            if not tcol: continue
+            d = df.copy()
+            if "isHold" in d.columns and not include_hold:
+                d = d.loc[normalize_is_hold(d["isHold"]) == 0]
+            if d.empty: continue
+            counts = d.groupby(d[tcol].astype(str).str.strip()).size()
+            for nm, n in counts.items():
+                per[str(nm).strip()][kind] += int(n)
+
+    rows = []
+    for nm, dd in per.items():
+        total = int(dd["Quiz"] + dd["Worksheet"] + dd["Prasso"] + dd["Reading"])
+        rows.append({"Name": nm, **dd, "No of Assignments Assigned": total})
+    ass_df = pd.DataFrame(rows)
+
+    # 3) Merge base + assignment counts
+    out = pd.merge(base, ass_df, on="Name", how="outer", suffixes=("","_from_files"))
+
+    # normalize numeric
+    for c in ["Quiz","Worksheet","Prasso","Reading","No of logins","No of Lessons Accessed",
+              "No of Assignments Assigned","No of Assignments Assigned_from_files"]:
+        if c in out.columns:
+            out[c] = pd.to_numeric(out[c], errors="coerce").fillna(0).astype(int)
+
+    # prefer max between CSV total and counted total
+    if "No of Assignments Assigned_from_files" in out.columns:
+        base_col = "No of Assignments Assigned"
+        out[base_col] = out[[base_col, "No of Assignments Assigned_from_files"]].max(axis=1)
+        out = out.drop(columns=["No of Assignments Assigned_from_files"])
+
+    # 4) Attach userId (if we have it) and map Classes Handled
+    # 4) Attach userId (if present) and map Classes Handled
+    # Build a (Name -> userId) frame from teachers_df using flexible headers.
+    out["userId"] = ""  # ensure the column exists even if we never find IDs
+
+    id_map = pd.DataFrame()
+    if teachers_df is not None and not teachers_df.empty:
+        name_col = pick_col(teachers_df, "Name","userName","username","Teacher","Teacher Name","User")
+        id_col   = pick_col(teachers_df, "userId","user_id","User ID","userid","UserId","USERID","User Id")
+        if name_col:
+            cols = [name_col] + ([id_col] if id_col else [])
+            id_map = teachers_df[cols].copy()
+            # normalize columns locally to avoid KeyError
+            id_map = id_map.rename(columns={name_col: "_tu_name"})
+            if id_col:
+                id_map = id_map.rename(columns={id_col: "_tu_userId"})
+            id_map["_tu_name"] = id_map["_tu_name"].astype(str).str.strip()
+            if "_tu_userId" in id_map.columns:
+                id_map["_tu_userId"] = id_map["_tu_userId"].astype(str).str.strip().str.lower()
+            id_map = id_map.drop_duplicates(subset=["_tu_name"], keep="first")
+
+    # Merge the ID map (if any) and materialize `userId`
+    if not id_map.empty:
+        out = out.merge(id_map, left_on="Name", right_on="_tu_name", how="left")
+        if "_tu_userId" in out.columns:
+            out["userId"] = out["_tu_userId"].astype(str).str.strip()
+        out = out.drop(columns=[c for c in ["_tu_name","_tu_userId"] if c in out.columns])
+
+    # Map to Classes Handled using the preloaded classes_map (user_id -> classes_taught)
+    classes_map = {str(k).strip().lower(): str(v).strip() for k, v in (classes_map or {}).items()}
+    out["Classes Handled"] = out["userId"].astype(str).str.strip().str.lower().map(lambda k: classes_map.get(k, "NA"))
+
+    # 5) Demo flag (by name OR id)
+    demo_set = {str(s).strip().lower() for s in (demo_teachers or set())}
+    out["Is Demo Teacher"] = out["Name"].astype(str).str.strip().str.lower().isin(demo_set) \
+                             | out["userId"].astype(str).str.strip().str.lower().isin(demo_set)
+
+   
+
+    # Final columns in the requested order (Classes Handled = 3rd)
+    want = ["Name","Is Demo Teacher","Classes Handled",
+            "No of logins","No of Lessons Accessed","No of Assignments Assigned",
+            "Quiz","Worksheet","Prasso","Reading"]
+    for c in want:
+        if c not in out.columns:
+            out[c] = 0 if c not in ("Name","Is Demo Teacher","Classes Handled") else ("NA" if c=="Classes Handled" else (False if c=="Is Demo Teacher" else ""))
+    return out[want].sort_values("Name", kind="stable")
+
+
+
+
 def build_levelwise_from_frames(frames, logins_df=None):
     if not frames: return pd.DataFrame(columns=["Level","Class","No of Lessons Accessed"])
     cleaned=[]
@@ -447,6 +675,149 @@ def build_levelwise_from_frames(frames, logins_df=None):
     out["Level"]=out["Class"].apply(to_grade)
     out=add_class_sort(out,"Class").sort_values(["_sort","Class"], kind="stable").drop(columns="_sort").reset_index(drop=True)
     return out
+
+# def build_levelwise_with_assignments(lesson_frames, school_assign_df=None, logins_df=None):
+    # """
+    # Returns: Levelwise table with
+      # Level | Class | No of Lessons Accessed | Assignments Assigned
+
+    # - lesson_frames: list of 'Level Lessons Usage' dataframes (as you already pass)
+    # - school_assign_df: a 'School Assignments Usage' dataframe (OPTIONAL). If present,
+      # 'Assignments Assigned' is sum of ONGOING_* per class; else 0.
+    # - logins_df: used to backfill Class labels from LEVEL when needed.
+    # """
+    # # ---- Lessons (reuse logic similar to build_levelwise_from_frames) ----
+    # lessons = build_levelwise_from_frames(lesson_frames, logins_df=logins_df)
+    # if lessons.empty:
+        # lessons = pd.DataFrame(columns=["Level","Class","No of Lessons Accessed"])
+
+    # # ---- Assignments (sum ONGOING_* per class) ----
+    # assign = pd.DataFrame(columns=["Level","Class","Assignments Assigned"])
+    # if school_assign_df is not None and not school_assign_df.empty:
+        # d = school_assign_df.copy()
+        # # tolerant header picks
+        # lv_col   = next((c for c in d.columns if c.lower() in ("level_display_name","class")), None)
+        # lvl_col  = next((c for c in d.columns if c.lower() == "level"), None)
+        # aqc_col  = next((c for c in d.columns if "ongoing_aqc" in c.lower()), None)
+        # wks_col  = next((c for c in d.columns if "ongoing_worksheet" in c.lower()), None)
+        # prs_col  = next((c for c in d.columns if "ongoing_prasso" in c.lower()), None)
+        # rdg_col  = next((c for c in d.columns if "ongoing_reading" in c.lower()), None)
+
+        # if lv_col or lvl_col:
+            # keep = [c for c in [lv_col, lvl_col, aqc_col, wks_col, prs_col, rdg_col] if c]
+            # dd = d[keep].copy()
+            # for c in [aqc_col, wks_col, prs_col, rdg_col]:
+                # if c in dd.columns:
+                    # dd[c] = pd.to_numeric(dd[c], errors="coerce").fillna(0).astype(int)
+
+            # # Class label
+            # if lv_col in dd.columns:
+                # dd = dd.rename(columns={lv_col: "Class"})
+            # elif lvl_col in dd.columns:
+                # dd = dd.rename(columns={lvl_col: "LEVEL"})
+                # # backfill class from logins_df if we have it
+                # if logins_df is not None and {"LEVEL","LEVEL_DISPLAY_NAME"}.issubset(logins_df.columns):
+                    # dd = dd.merge(
+                        # logins_df[["LEVEL","LEVEL_DISPLAY_NAME"]].drop_duplicates(),
+                        # on="LEVEL", how="left"
+                    # ).rename(columns={"LEVEL_DISPLAY_NAME":"Class"})
+
+            # # Level (nice label) from Class
+            # def to_grade(s):
+                # s=str(s); m=re.search(r'(\d+)', s)
+                # return f"Grade {int(m.group(1))}" if m else s
+            # if "Class" in dd.columns:
+                # dd["Level"] = dd["Class"].apply(to_grade)
+
+            # # Sum assignments
+            # comp = [c for c in [aqc_col, wks_col, prs_col, rdg_col] if c in dd.columns]
+            # if comp:
+                # dd["Assignments Assigned"] = dd[comp].sum(axis=1).astype(int)
+                # assign = dd[["Level","Class","Assignments Assigned"]].copy()
+
+    # # ---- Merge lessons + assignments ----
+    # out = pd.merge(
+        # lessons,
+        # assign,
+        # on=["Level","Class"],
+        # how="outer",
+        # validate="one_to_one"
+    # )
+    # if "No of Lessons Accessed" not in out.columns:
+        # out["No of Lessons Accessed"] = 0
+    # if "Assignments Assigned" not in out.columns:
+        # out["Assignments Assigned"] = 0
+    # out["No of Lessons Accessed"] = pd.to_numeric(out["No of Lessons Accessed"], errors="coerce").fillna(0).astype(int)
+    # out["Assignments Assigned"]    = pd.to_numeric(out["Assignments Assigned"], errors="coerce").fillna(0).astype(int)
+
+    # # sort by class as in your helper
+    # out = add_class_sort(out, "Class").sort_values(["_sort","Class"], kind="stable").drop(columns="_sort").reset_index(drop=True)
+    # return out
+
+def build_levelwise_with_assignments(lesson_frames, school_assign_df=None, logins_df=None):
+    """
+    Returns: Levelwise with columns:
+      Level | Class | No of Lessons Accessed | Assignments Assigned
+    """
+    # Lessons (reuse your existing builder)
+    lessons = build_levelwise_from_frames(lesson_frames, logins_df=logins_df)
+    if lessons.empty:
+        lessons = pd.DataFrame(columns=["Level","Class","No of Lessons Accessed"])
+
+    # Assignments: sum ONGOING_* per class
+    assign = pd.DataFrame(columns=["Level","Class","Assignments Assigned"])
+    if school_assign_df is not None and not school_assign_df.empty:
+        d = school_assign_df.copy()
+        lv_col  = next((c for c in d.columns if c.lower() in ("level_display_name","class")), None)
+        lvl_col = next((c for c in d.columns if c.lower() == "level"), None)
+        aqc = next((c for c in d.columns if "ongoing_aqc" in c.lower()), None)
+        wks = next((c for c in d.columns if "ongoing_worksheet" in c.lower()), None)
+        prs = next((c for c in d.columns if "ongoing_prasso" in c.lower()), None)
+        rdg = next((c for c in d.columns if "ongoing_reading" in c.lower()), None)
+        alt_total = next((c for c in d.columns if "assignments assigned" in c.lower()
+                          or "total assignments" in c.lower()
+                          or "no of assignments" in c.lower()), None)
+
+        keep = [x for x in [lv_col, lvl_col, aqc, wks, prs, rdg, alt_total] if x]
+        if keep:
+            dd = d[keep].copy()
+            for c in [aqc,wks,prs,rdg,alt_total]:
+                if c in dd.columns:
+                    dd[c] = pd.to_numeric(dd[c], errors="coerce").fillna(0).astype(int)
+
+            # Class label
+            if lv_col in dd.columns:
+                dd = dd.rename(columns={lv_col: "Class"})
+            elif lvl_col in dd.columns:
+                dd = dd.rename(columns={lvl_col: "LEVEL"})
+                if logins_df is not None and {"LEVEL","LEVEL_DISPLAY_NAME"}.issubset(logins_df.columns):
+                    dd = dd.merge(logins_df[["LEVEL","LEVEL_DISPLAY_NAME"]].drop_duplicates(),
+                                  on="LEVEL", how="left").rename(columns={"LEVEL_DISPLAY_NAME":"Class"})
+
+            # Level from Class
+            def to_grade(s):
+                s=str(s); m=re.search(r"(\d+)", s)
+                return f"Grade {int(m.group(1))}" if m else s
+            if "Class" in dd.columns:
+                dd["Level"] = dd["Class"].apply(to_grade)
+
+            # total assignments
+            comp = [c for c in [aqc,wks,prs,rdg] if c in dd.columns]
+            if comp:
+                dd["Assignments Assigned"] = dd[comp].sum(axis=1).astype(int)
+            elif alt_total and alt_total in dd.columns:
+                dd["Assignments Assigned"] = dd[alt_total].astype(int)
+            assign = dd[["Level","Class","Assignments Assigned"]].copy()
+
+    out = pd.merge(lessons, assign, on=["Level","Class"], how="outer")
+    if "No of Lessons Accessed" not in out.columns: out["No of Lessons Accessed"]=0
+    if "Assignments Assigned" not in out.columns:    out["Assignments Assigned"]=0
+    out["No of Lessons Accessed"] = pd.to_numeric(out["No of Lessons Accessed"], errors="coerce").fillna(0).astype(int)
+    out["Assignments Assigned"]    = pd.to_numeric(out["Assignments Assigned"], errors="coerce").fillna(0).astype(int)
+    out = add_class_sort(out, "Class").sort_values(["_sort","Class"], kind="stable").drop(columns="_sort").reset_index(drop=True)
+    return out
+
+
 
 def filter_active_grades(su, min_students=1, min_activity=0):
     act_cols=["No of Logins","No of Lessons Accessed","Quiz","Worksheet","Prasso","Reading"]
@@ -523,99 +894,871 @@ def load_teacher_quiz_by_class_from_zip(zip_bytes: bytes) -> dict[str, pd.DataFr
                 out[normalize_class(klass)]=read_csv_flex_from_bytes(zf.read(name))
     return out
 
+# ===================== SU Helpers (strict per mapping) =====================
+def _extract_class_from_teacher_assignment_name(name: str, base_label: str | None = None) -> str:
+    """
+    Extracts the class number from file names like:
+      'TeacherQuizAssignment_Class 10_...csv'  -> 'Grade 10'
+      'TeacherWorksheetAssignment_Standard5_...csv' -> 'Grade 5'
+      '...IGCSE 7...' -> 'Grade 7'
+    Returns '' if nothing found.
+    """
+    m = re.search(r"(Class|Grade|Std|Standard|IGCSE|CAM)\s*0*(\d{1,2})", str(name or ""), flags=re.I)
+    if not m:
+        return ""
+    n = int(m.group(2))
+    if 1 <= n <= 12:
+        return f"Grade {n}"
+    return ""
+
+
+def load_teacher_assignments_by_class_from_zip(zip_bytes: bytes, kind: str, base_label: str | None = None) -> dict[str, pd.DataFrame]:
+    patt = re.compile(rf"Teacher\s*{re.escape(kind)}\s*Assignment[^/]*?\.csv$", re.I)
+    out={}
+    with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+        for name in zf.namelist():
+            if not name.lower().endswith(".csv"):
+                continue
+            if not patt.search(name):
+                continue
+            df = read_csv_flex_from_bytes(zf.read(name))
+            klass = _extract_class_from_teacher_assignment_name(name, base_label=base_label)
+            out[normalize_class(klass)] = df
+    return out
+    
+def _clean_detail_table(df: pd.DataFrame, drop_mode: bool = False) -> pd.DataFrame:
+    """Drop empty rows/cols, strip whitespace, de-dup, optionally hide Mode."""
+    if df is None or df.empty:
+        return pd.DataFrame()
+    d = df.copy()
+
+    # strip spaces in object cols
+    for c in d.columns:
+        if pd.api.types.is_string_dtype(d[c]) or d[c].dtype == "object":
+            d[c] = d[c].astype(str).str.strip()
+
+    # standardize recipient token
+    if "Recipient Token" in d.columns:
+        rt = d["Recipient Token"].astype(str).str.strip()
+        rt_low = rt.str.lower()
+        d = d[~(rt_low.isna() | (rt_low == "") | (rt_low == "__empty__") | (rt_low == "nan"))]
+
+    # drop rows where BOTH teacher and assignment name are blank (if those cols exist)
+    t_blank = d["Teacher"].astype(str).str.strip().eq("") if "Teacher" in d.columns else False
+    a_blank = d["Assignment Name"].astype(str).str.strip().eq("") if "Assignment Name" in d.columns else False
+    if isinstance(t_blank, pd.Series) and isinstance(a_blank, pd.Series):
+        d = d[~(t_blank & a_blank)]
+
+    d = d.dropna(how="all").drop_duplicates()
+
+    if drop_mode:
+        d = d.drop(columns=["Mode"], errors="ignore")
+
+    # nice order if present
+    cols = [c for c in ["Class","Type","Teacher","Assignment Name","Mode","Recipient Token"] if c in d.columns]
+    if cols:
+        d = d[cols]
+    return d.reset_index(drop=True)
+
+
+
+# === Class token detection (prefix-based; supports sections like "Class 1A1 SS") ===
+CLASS_START = re.compile(r'^\s*(class|standard|std|grade|igcse|cam)\s*0*(1[0-2]|[1-9])', re.I)
+def _token_is_class(token: str) -> bool:
+    return bool(CLASS_START.match(str(token or "")))
+def _split_tokens(val) -> list[str]:
+    toks = [t.strip() for t in str(val or "").split(",") if str(t).strip()]
+    return toks or ["__EMPTY__"]
+
+def _count_assignments_from_map(
+    
+    assign_map: dict,
+    include_demo_t: bool = False,
+    include_demo_s: bool = False,
+    include_hold:   bool = False,
+    include_indiv:  bool = False,
+    demo_teacher_ids: set | None = None,
+    demo_student_ids: set | None = None,
+):
+    """Token-based counting per class with grouped detail rows."""
+    from collections import defaultdict, OrderedDict
+
+    eff   = defaultdict(int)
+    demo_t = defaultdict(int)
+    demo_s = defaultdict(int)
+    hold   = defaultdict(int)
+    indiv  = defaultdict(int)
+
+    # group stores: key=(Class, Teacher, Title, Mode) -> Ordered unique tokens
+    grp_indiv: dict[tuple, OrderedDict] = {}
+    grp_demo_t: dict[tuple, OrderedDict] = {}
+    grp_demo_s: dict[tuple, OrderedDict] = {}
+    grp_hold:   dict[tuple, OrderedDict] = {}
+
+    dt_ids = {str(x).strip().lower() for x in (demo_teacher_ids or set())}
+    ds_ids = {str(x).strip().lower() for x in (demo_student_ids or set())}
+
+    def _add_token(store: dict, key: tuple, token: str):
+        od = store.setdefault(key, OrderedDict())
+        if token not in od:
+            od[token] = True  # preserve insertion order
+
+    for klass, df in (assign_map or {}).items():
+        if df is None or df.empty:
+            continue
+
+        # teacher_col = 'teacher' if 'teacher' in df.columns else None
+        # title_col   = '_title' if '_title' in df.columns else ('title' if 'title' in df.columns else None)
+        # mode_col    = '_mode' if '_mode' in df.columns else ('assignmentGroupMode' if 'assignmentGroupMode' in df.columns else ('Mode' if 'Mode' in df.columns else ('Type' if 'Type' in df.columns else None)))
+       
+        # teacher_col = 'teacher' if 'teacher' in df.columns else None
+        # title_col   = '_title' if '_title' in df.columns else ('title' if 'title' in df.columns else None)
+        # mode_col    = '_mode' if '_mode' in df.columns else ('assignmentGroupMode' if 'assignmentGroupMode' in df.columns else ('Mode' if 'Mode' in df.columns else ('Type' if 'Type' in df.columns else None)))
+
+        # --- with this: ---
+        teacher_col = pick_col(
+            df,
+            "teacher", "Teacher", "Teacher Name", "user_id", "User ID",
+            "username", "userName", "Name"
+        )
+        title_col = pick_col(
+            df,
+            "_title", "title", "Title", "Assignment Name", "assessmentName",
+            "Assessment Name", "Task Title"
+        )
+        mode_col = pick_col(
+            df,
+            "_mode", "assignmentGroupMode", "Mode", "Type",
+            "assessmentMode", "Assessment Mode", "mode"
+        )
+        assigned_to_col = pick_col(
+            df,
+            "assignedTo", "Assigned To", "AssignedTo", "Assigned_To",
+            "Recipients", "Recipient", "Recipient Token", "Assigned"
+        )
+
+        for _, r in df.iterrows():
+            teacher_val = str(r.get(teacher_col, "")).strip()
+            teacher_key = teacher_val.lower()
+            title = str(r.get(title_col, "")) if title_col else ""
+            mode  = str(r.get(mode_col, "")) if mode_col else ""
+            #tokens = _split_tokens(r.get('assignedTo'))
+            tokens = _split_tokens(r.get(assigned_to_col))
+
+
+            row_is_hold = False
+            if 'isHold' in df.columns:
+                row_is_hold = int(pd.to_numeric(r.get('isHold', 0), errors='coerce') or 0) == 1
+
+            for tok in tokens:
+                tok_norm = str(tok).strip()
+                tok_key  = tok_norm.lower()
+                is_class = _token_is_class(tok_norm)
+
+                if row_is_hold:
+                    hold[klass] += 1
+                    _add_token(grp_hold,   (klass, teacher_val, title, mode), tok_norm)
+                    continue
+
+                if teacher_key in dt_ids:
+                    demo_t[klass] += 1
+                    _add_token(grp_demo_t, (klass, teacher_val, title, mode), tok_norm)
+                    continue
+
+                if (not is_class) and (tok_key in ds_ids):
+                    demo_s[klass] += 1
+                    _add_token(grp_demo_s, (klass, teacher_val, title, mode), tok_norm)
+                    continue
+
+                if not is_class:
+                    indiv[klass] += 1
+                    _add_token(grp_indiv,  (klass, teacher_val, title, mode), tok_norm)
+                    continue
+
+                # class token -> SU base
+                eff[klass] += 1
+
+    # apply toggles
+    if include_hold:
+        for k, v in hold.items():   eff[k] += v
+    if include_demo_t:
+        for k, v in demo_t.items(): eff[k] += v
+    if include_demo_s:
+        for k, v in demo_s.items(): eff[k] += v
+    if include_indiv:
+        for k, v in indiv.items():  eff[k] += v
+
+    # build grouped detail rows (comma-separated recipients)
+    def _to_rows(store: dict):
+        rows=[]
+        for (klass, teacher, title, mode), od in store.items():
+            tokens = [t for t in od.keys() if t not in (None, "__EMPTY__")]
+            rows.append({
+                "Class": klass,
+                "Teacher": teacher,
+                "Assignment Name": title,
+                "Mode": mode,
+                "Recipient Token": ", ".join(tokens)
+            })
+        return rows
+
+    detail = {
+        "indiv_bands": _to_rows(grp_indiv),
+        "demo_t":      _to_rows(grp_demo_t),
+        "demo_s":      _to_rows(grp_demo_s),
+        "hold":        _to_rows(grp_hold),
+    }
+    return eff, demo_t, demo_s, hold, detail
+
+def build_su_from_teacher_maps(
+    logins_df,
+    lessons_df,
+    maps_by_kind,
+    include_demo_t: bool = False,
+    include_demo_s: bool = False,
+    include_hold:   bool = False,
+    include_indiv:  bool = False,
+    demo_teacher_ids: set | None = None,
+    demo_student_ids: set | None = None
+):
+    if logins_df is None or logins_df.empty:
+        raise ValueError('School Logins Report missing/empty')
+    need=['LEVEL','LEVEL_DISPLAY_NAME','TOTAL_STUDENTS','TOTAL_LOGINS']
+    miss=[c for c in need if c not in logins_df.columns]
+    if miss:
+        raise ValueError(f'Logins CSV missing required columns: {miss}')
+
+    base = logins_df[['LEVEL','LEVEL_DISPLAY_NAME','TOTAL_STUDENTS','TOTAL_LOGINS']].copy()
+    base = base.rename(columns={'LEVEL_DISPLAY_NAME':'Class','TOTAL_STUDENTS':'No of Students','TOTAL_LOGINS':'No of Logins'})
+
+    if lessons_df is not None and not lessons_df.empty and {'LEVEL','LESSONS_ACCESSED'}.issubset(lessons_df.columns):
+        tmp = lessons_df[['LEVEL','LESSONS_ACCESSED']].copy().rename(columns={'LESSONS_ACCESSED':'No of Lessons Accessed'})
+        base = base.merge(tmp, on='LEVEL', how='left')
+    else:
+        base['No of Lessons Accessed'] = 0
+
+    for c in ['No of Students','No of Logins','No of Lessons Accessed']:
+        base[c] = pd.to_numeric(base[c], errors='coerce').fillna(0).astype(int)
+
+    kinds = ['Quiz','Worksheet','Prasso','Reading']
+    detail_rows = {'indiv_bands':[], 'demo_t':[], 'demo_s':[], 'hold':[]}
+    by_kind_counts = {}
+
+    for k in kinds:
+        eff, d_t, d_s, h, detail = _count_assignments_from_map(
+            maps_by_kind.get(k) or {},
+            include_demo_t=include_demo_t,
+            include_demo_s=include_demo_s,
+            include_hold=include_hold,
+            include_indiv=include_indiv,
+            demo_teacher_ids=demo_teacher_ids,
+            demo_student_ids=demo_student_ids,
+        )
+        by_kind_counts[k] = eff
+
+        for key in detail_rows.keys():
+            for r in detail[key]:
+                rr = dict(r); rr["Type"] = k
+                detail_rows[key].append(rr)
+
+    def keyify(lbl: str) -> str:
+        s = str(lbl or '').lower().strip()
+        m = re.search(r'(\d+)', s)
+        return normalize_class(f'grade {int(m.group(1))}') if m else normalize_class(s)
+
+    for k in kinds:
+        base[k] = base['Class'].map(lambda c: by_kind_counts.get(k,{}).get(keyify(c), 0)).fillna(0).astype(int)
+
+    out = add_class_sort(base.rename(columns={'LEVEL':'_LEVEL'}), 'Class').sort_values(['_sort','Class'], kind='stable').drop(columns='_sort')
+    cols = ['Class','No of Students','No of Logins','No of Lessons Accessed','Quiz','Worksheet','Prasso','Reading']
+    for c in cols:
+        if c not in out.columns: out[c]=0
+    out = out[cols]
+
+    det = {k: pd.DataFrame(v, columns=["Class","Type","Teacher","Assignment Name","Mode","Recipient Token"]) for k,v in detail_rows.items()}
+    return out, det
+
+# ---- Demo ids / Classes Handled workbook loader ----
+def load_demo_book(xls_bytes) -> tuple[set, set, dict]:
+    demo_t, demo_s, classes_map = set(), set(), {}
+    try:
+        xls = pd.ExcelFile(io.BytesIO(xls_bytes))
+    except Exception:
+        return demo_t, demo_s, classes_map
+
+    def first_text_col(df):
+        for c in df.columns:
+            ser = df[c].dropna().astype(str).str.strip()
+            if not ser.empty and (ser != "").any():
+                return ser.tolist()
+        return []
+
+    for sh in xls.sheet_names:
+        low = sh.lower()
+        df = pd.read_excel(xls, sheet_name=sh)
+        if "demo" in low and "teacher" in low:
+            demo_t.update([str(x).strip() for x in first_text_col(df) if str(x).strip()])
+        elif "demo" in low and "student" in low:
+            demo_s.update([str(x).strip() for x in first_text_col(df) if str(x).strip()])
+        elif "class" in low:
+            if len(df.columns) >= 2:
+                tcol, ccol = df.columns[:2]
+                for _, r in df.iterrows():
+                    t = str(r.get(tcol, "")).strip()
+                    cl = str(r.get(ccol, "")).strip()
+                    if t and cl:
+                        classes_map.setdefault(t, []).append(cl)
+            else:
+                cls = first_text_col(df)
+                if cls:
+                    classes_map.setdefault("_all", []).extend([str(x).strip() for x in cls if str(x).strip()])
+    return demo_t, demo_s, classes_map
+
+def _df_to_csv_bytes(df):
+    return df.to_csv(index=False).encode("utf-8")
+
+def _df_to_xlsx_bytes(df, sheet_name="data"):
+    try:
+        import xlsxwriter  # noqa: F401
+    except Exception:
+        pass
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
+        df.to_excel(writer, index=False, sheet_name=sheet_name)
+    buf.seek(0)
+    return buf.getvalue()
+
 # ------------------------ UI -----------------------------------------
 st.title("HeyMath! School Report Builder")
 tab_zip, tab_csv = st.tabs(["Upload ZIP (recommended)","Upload CSVs"])
 
 # ================= ZIP FLOW =================
 with tab_zip:
+    # Inputs
+    up = st.file_uploader("Drop a HeyMath ZIP here", type=["zip"])
+    #demo_book = st.file_uploader("Upload Demo_ids_classesHandled.xlsx (optional — demo ids)", type=["xlsx"], key="zip_demo_book")
+    demo_book = None
+    
     su = st.session_state.get("zip_su", pd.DataFrame())
     tu = st.session_state.get("zip_tu", pd.DataFrame())
     lv = st.session_state.get("zip_lv", pd.DataFrame())
     asr = st.session_state.get("zip_asr", pd.DataFrame())
 
-    up = st.file_uploader("Drop a HeyMath ZIP here", type=["zip"])
+    submitted, mode, min_students, min_activity, whitelist = compact_options_form(prefix_key="zip")
+
     if up is not None:
         zip_bytes = up.read()
         a_df, l_df, g_df, t_df, names = detect_files_in_zip(zip_bytes)
+        st.session_state["zip_assign_df"] = a_df 
         if any(x is None for x in (a_df,l_df,g_df)):
             st.error("Could not auto-detect Assignments/Lessons/Logins from the ZIP.")
         else:
             st.caption(f"Detected: Assignments=`{names['assign']}`, Lessons=`{names['lessons']}`, Logins=`{names['logins']}`, Teachers=`{names['teachers']}`")
-            submitted, mode, min_students, min_activity, whitelist = compact_options_form(prefix_key="zip")
-            if submitted:
-                su = build_su(a_df,l_df,g_df)
-                if mode.startswith("Active"): su=filter_active_grades(su, min_students, min_activity)
-                elif mode=="Whitelist":
-                    allow={g.strip().lower() for g in whitelist.split(",") if g.strip()}
-                    if allow: su=su[su["Class"].str.lower().isin(allow)]
-                tu = build_tu(t_df)
-                # Levelwise (from any Level Lessons CSVs in ZIP)
-                frames=[]
-                with zipfile.ZipFile(io.BytesIO(zip_bytes),"r") as zf:
-                    for name in zf.namelist():
-                        if name.lower().endswith(".csv") and "level lessons usage" in name.lower():
+
+       
+        # --- before building SU, load the demo workbook automatically if present ---
+        auto_demo_bytes = try_load_demo_book_bytes()                  # uses local Demo_ids_classesHandled.xlsx if present
+        demo_bytes = auto_demo_bytes or (demo_book.read() if demo_book else None)
+
+        demo_t_ids, demo_t_names, demo_s_ids = set(), set(), set()
+        classes_map = {}  # user_id(lower) -> classes_taught
+
+        if demo_bytes:
+            try:
+                xls = pd.ExcelFile(io.BytesIO(demo_bytes))
+
+                # demo teachers
+                if "demo_tchr_ids" in xls.sheet_names:
+                    tdf = pd.read_excel(xls, "demo_tchr_ids")
+                    if "user_id" in tdf.columns:
+                        demo_t_ids = set(tdf["user_id"].astype(str).str.strip())
+                    if "Name" in tdf.columns:
+                        demo_t_names = set(tdf["Name"].astype(str).str.strip())
+
+                # demo students
+                if "demo_stud_ids" in xls.sheet_names:
+                    sdf = pd.read_excel(xls, "demo_stud_ids")
+                    if "user_id" in sdf.columns:
+                        demo_s_ids = set(sdf["user_id"].astype(str).str.strip())
+
+                # classes_handled sheet -> classes_map
+                cls_sheet = next((s for s in xls.sheet_names if "class" in s.lower() and "handle" in s.lower()), None)
+                if cls_sheet:
+                    cdf = pd.read_excel(xls, cls_sheet)
+                    uid_col = next((c for c in cdf.columns if c.lower() in ("user_id","userid","user id")), None)
+                    taught_col = next((c for c in cdf.columns if "classes_taught" in c.lower() or "classes handled" in c.lower()), None)
+                    if uid_col and taught_col:
+                        tmp = cdf[[uid_col, taught_col]].copy()
+                        tmp[uid_col]    = tmp[uid_col].astype(str).str.strip().str.lower()
+                        tmp[taught_col] = tmp[taught_col].astype(str).str.strip().replace({"": "NA"})
+                        classes_map = {u: t for u, t in zip(tmp[uid_col], tmp[taught_col]) if u}
+
+                if auto_demo_bytes:
+                    st.caption("Loaded demo workbook from local file: Demo_ids_classesHandled.xlsx")
+                elif demo_book:
+                    st.caption(f"Loaded demo workbook from upload: {demo_book.name}")
+
+            except Exception as e:
+                st.warning(f"Could not read Demo_ids_classesHandled.xlsx ({type(e).__name__}). Proceeding without demo ids.")
+
+        # store in session for preview recompute
+        st.session_state["zip_demo_t_ids"]   = demo_t_ids
+        st.session_state["zip_demo_t_names"] = demo_t_names
+        st.session_state["zip_demo_s_ids"]   = demo_s_ids
+        st.session_state["zip_classes_map"]   = classes_map
+        
+        if submitted:
+            # Build Teacher*Assignment maps from ZIP
+            t_map = {
+                "Quiz":       load_teacher_assignments_by_class_from_zip(zip_bytes, "Quiz"),
+                "Worksheet":  load_teacher_assignments_by_class_from_zip(zip_bytes, "Worksheet"),
+                "Prasso":     load_teacher_assignments_by_class_from_zip(zip_bytes, "Prasso"),
+                "Reading":    load_teacher_assignments_by_class_from_zip(zip_bytes, "Reading"),
+            }
+
+            # Combined demo teachers (ids + names, lowercased)
+            combined_demo_teachers = {s.strip().lower() for s in demo_t_ids} | {s.strip().lower() for s in demo_t_names}
+
+            # Initial SU (all toggles off by default)
+            su, su_details = build_su_from_teacher_maps(
+                g_df, l_df, t_map,
+                include_demo_t=False, include_demo_s=False, include_hold=False, include_indiv=False,
+                demo_teacher_ids=combined_demo_teachers,
+                demo_student_ids=demo_s_ids
+            )
+            with st.expander("Debug: Teacher assignment files found"):
+                for kind, m in (t_map or {}).items():
+                    classes = sorted([k for k, df in (m or {}).items() if df is not None and not df.empty])
+                    st.write(f"{kind}: {classes}")
+
+            if mode.startswith("Active"):
+                su=filter_active_grades(su, min_students, min_activity)
+            elif mode=="Whitelist":
+                allow={g.strip().lower() for g in whitelist.split(",") if g.strip()}
+                if allow: su=su[su["Class"].str.lower().isin(allow)]
+
+            
+            combined_demo_teachers = {s.strip().lower() for s in demo_t_ids} | {s.strip().lower() for s in demo_t_names}
+            tu = build_tu_enhanced(
+                teachers_df=t_df,
+                t_map=t_map,
+                include_hold=False,
+                demo_teachers=combined_demo_teachers,
+                classes_map=st.session_state.get("zip_classes_map", {})  # <-- uses what we just stored
+            )
+
+
+            st.session_state["zip_tu"] = tu
+
+
+            # Levelwise (from any "Level Lessons Usage" CSVs found inside the ZIP)
+            frames = []
+            with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+                for name in zf.namelist():
+                    if name.lower().endswith(".csv") and "level lessons usage" in name.lower():
+                        try:
                             frames.append(read_csv_flex_from_bytes(zf.read(name)))
-                lv = build_levelwise_from_frames(frames, logins_df=g_df)
-                # ASR
-                sa_df = load_school_assignments_from_zip(zip_bytes)
-                tqa_map = load_teacher_quiz_by_class_from_zip(zip_bytes)
-                asr = build_asr_quiz_split(sa_df, tqa_map) if sa_df is not None else pd.DataFrame()
-                # store
-                st.session_state["zip_su"]=su; st.session_state["zip_tu"]=tu
-                st.session_state["zip_lv"]=lv; st.session_state["zip_asr"]=asr
+                        except Exception as e:
+                            st.warning(f"Could not read Level Lessons file '{name}' ({type(e).__name__}).")
+
+            lv = build_levelwise_from_frames(frames, logins_df=g_df)
+            st.session_state["zip_lv"] = lv
+
+
+
+            # ASR
+            sa_df = load_school_assignments_from_zip(zip_bytes)
+            tqa_map = load_teacher_quiz_by_class_from_zip(zip_bytes)
+            asr = build_asr_quiz_split(sa_df, tqa_map) if sa_df is not None else pd.DataFrame()
+
+            # store
+            st.session_state["zip_su"]=su
+            st.session_state["zip_su_details"]=su_details
+            st.session_state["zip_tu"]=tu
+            st.session_state["zip_t_map"]=t_map
+            st.session_state["zip_g_df"]=g_df
+            st.session_state["zip_l_df"]=l_df
+            st.session_state["zip_lv"]=lv
+            st.session_state["zip_asr"]=asr
 
     tab1, tab2, tab3, tab4 = st.tabs(["SU preview","TU preview","Levelwise preview","Assignment Summary"])
 
     with tab1:
-        if not su.empty:
-            center_table(su, key="su_tbl_zip")
-            metrics=[c for c in ["No of Lessons Accessed","No of Logins","No of Students","Quiz","Worksheet","Prasso","Reading"] if c in su.columns]
+        st.markdown("### SU preview")
+
+        # Ensure defaults
+        if "zip_demo_t_ids" not in st.session_state:
+            st.session_state["zip_demo_t_ids"] = set()
+        if "zip_demo_t_names" not in st.session_state:
+            st.session_state["zip_demo_t_names"] = set()
+        if "zip_demo_s_ids" not in st.session_state:
+            st.session_state["zip_demo_s_ids"] = set()
+
+        # === Options (all unchecked by default) ===
+        with st.expander("SU counting options", expanded=False):
+            opt_hold  = st.checkbox("Count on Hold Assignments", value=False, key="zip_view_hold")
+            opt_indiv = st.checkbox("Count Assignments to Individuals & Bands", value=False, key="zip_view_indiv")
+            opt_demo_t = st.checkbox("Count assignments by demo teachers", value=False, key="zip_view_demo_t")
+            opt_demo_s = st.checkbox("Count assignments to demo students", value=False, key="zip_view_demo_s")
+
+        # Recompute SU with current toggles
+        _g = st.session_state.get("zip_g_df"); _l = st.session_state.get("zip_l_df"); _m = st.session_state.get("zip_t_map")
+        demo_t_ids = st.session_state.get("zip_demo_t_ids", set())
+        demo_t_names = st.session_state.get("zip_demo_t_names", set())
+        demo_s_ids = st.session_state.get("zip_demo_s_ids", set())
+        combined_demo_teachers = {s.strip().lower() for s in demo_t_ids} | {s.strip().lower() for s in demo_t_names}
+
+        st.caption(f"Loaded demo teachers: ids={len(demo_t_ids)}, names={len(demo_t_names)}; demo students={len(demo_s_ids)}")
+
+        if _g is not None and _l is not None and _m is not None:
+            try:
+                su_view, det_view = build_su_from_teacher_maps(
+                    _g, _l, _m,
+                    include_demo_t=opt_demo_t,
+                    include_demo_s=opt_demo_s,
+                    include_hold=opt_hold,
+                    include_indiv=opt_indiv,
+                    demo_teacher_ids=combined_demo_teachers,
+                    demo_student_ids=demo_s_ids
+                )
+            except Exception as e:
+                st.warning(f"Recompute failed: {e}")
+                su_view, det_view = st.session_state.get("zip_su"), st.session_state.get("zip_su_details")
+        else:
+            su_view, det_view = st.session_state.get("zip_su"), st.session_state.get("zip_su_details")
+        
+        # Apply Grade selection to the current preview as well
+        if isinstance(su_view, pd.DataFrame) and not su_view.empty:
+            if mode.startswith("Active"):
+                su_view = filter_active_grades(su_view, min_students, min_activity)
+            elif mode == "Whitelist":
+                allow = {g.strip().lower() for g in whitelist.split(",") if g.strip()}
+                if allow:
+                    su_view = su_view[su_view["Class"].astype(str).str.lower().isin(allow)]
+            # mode == "All" -> no filter
+
+        # Render table + chart
+        if isinstance(su_view, pd.DataFrame) and not su_view.empty:
+            center_table(su_view, key="zip_su_table")
+            metrics=[c for c in ["No of Lessons Accessed","No of Students","No of Logins","Quiz","Worksheet","Prasso","Reading"] if c in su_view.columns]
             if metrics:
                 m=st.selectbox("Chart metric", metrics, key="su_metric_zip")
-                # natural class order on the x-axis (not value-sorted)
-                topn = su.copy()
-                topn = add_class_sort(topn, "Class")
-                topn[m]=pd.to_numeric(topn[m], errors="coerce").fillna(0).astype(int)
-                render_altair(
-                    bar_with_labels(topn, x="Class", y=m, height=360, width=900, category_sort="_sort"),
-                    "SU chart"
-                )
-        else:
-            st.info("Upload ZIP and click Build.")
+                topn = su_view.copy(); topn = add_class_sort(topn, "Class"); topn[m]=pd.to_numeric(topn[m], errors="coerce").fillna(0).astype(int)
+                render_altair(bar_with_labels(topn, x="Class", y=m, height=360, width=900, category_sort="_sort"), "SU chart")
 
+            # # === Detail tables (grouped, comma-separated) ===
+            # # det = det_view or {}
+            # # _df_ib = det.get("indiv_bands", pd.DataFrame())
+            # # _df_t  = det.get("demo_t", pd.DataFrame())
+            # # _df_s  = det.get("demo_s", pd.DataFrame())
+            # # _df_h  = det.get("hold", pd.DataFrame())
+            
+            # det = det_view or {}
+            # _df_ib = _clean_detail_table(det.get("indiv_bands", pd.DataFrame()), drop_mode=True)  # <— hide Mode
+            # _df_t  = _clean_detail_table(det.get("demo_t", pd.DataFrame()))
+            # _df_s  = _clean_detail_table(det.get("demo_s", pd.DataFrame()))
+            # _df_h  = _clean_detail_table(det.get("hold",   pd.DataFrame()))
+
+            # # …and keep the same rendering + download buttons, but feed the cleaned frames:
+            # if not _df_ib.empty:
+                # st.subheader("Assignments to Individuals & Bands")
+                # center_table(_df_ib, key="zip_su_tbl_indiv")
+                # _dl(_df_ib, "assignments_to_individuals_bands", "zip_indiv")
+
+            # if not _df_t.empty:
+                # st.subheader("Assignments issued by demo teachers")
+                # center_table(_df_t, key="zip_su_tbl_demo_t")
+                # _dl(_df_t, "assignments_by_demo_teachers", "zip_demo_t")
+
+            # if not _df_s.empty:
+                # st.subheader("Assignments issued to demo students")
+                # center_table(_df_s, key="zip_su_tbl_demo_s")
+                # _dl(_df_s, "assignments_to_demo_students", "zip_demo_s")
+
+            # if not _df_h.empty:
+                # st.subheader("Assignments on Hold")
+                # center_table(_df_h, key="zip_su_tbl_hold")
+                # _dl(_df_h, "assignments_on_hold", "zip_hold")
+            # === Detail tables (grouped, comma-separated) ===
+            det = det_view or {}
+            _df_ib = _clean_detail_table(det.get("indiv_bands", pd.DataFrame()), drop_mode=True)  # hide Mode
+            _df_t  = _clean_detail_table(det.get("demo_t", pd.DataFrame()))
+            _df_s  = _clean_detail_table(det.get("demo_s", pd.DataFrame()))
+            _df_h  = _clean_detail_table(det.get("hold",   pd.DataFrame()))
+
+            # define helper BEFORE calls
+            def _dl(df: pd.DataFrame, base: str, key_prefix: str):
+                if df is not None and not df.empty:
+                    _csv = _df_to_csv_bytes(df)
+                    st.download_button("Download CSV", _csv,
+                                       file_name=f"{base}.csv", mime="text/csv",
+                                       key=f"{key_prefix}_csv")
+                    try:
+                        _xlsx = _df_to_xlsx_bytes(df, sheet_name=base)
+                        st.download_button("Download XLSX", _xlsx,
+                                           file_name=f"{base}.xlsx",
+                                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                           key=f"{key_prefix}_xlsx")
+                    except Exception:
+                        pass
+
+            # render tables once (after helper is defined)
+            if not _df_ib.empty:
+                st.subheader("Assignments to Individuals & Bands")
+                center_table(_df_ib, key="zip_su_tbl_indiv")
+                _dl(_df_ib, "assignments_to_individuals_bands", "zip_indiv")
+
+            if not _df_t.empty:
+                st.subheader("Assignments issued by demo teachers")
+                center_table(_df_t, key="zip_su_tbl_demo_t")
+                _dl(_df_t, "assignments_by_demo_teachers", "zip_demo_t")
+
+            if not _df_s.empty:
+                st.subheader("Assignments issued to demo students")
+                center_table(_df_s, key="zip_su_tbl_demo_s")
+                _dl(_df_s, "assignments_to_demo_students", "zip_demo_s")
+
+            if not _df_h.empty:
+                st.subheader("Assignments on Hold")
+                center_table(_df_h, key="zip_su_tbl_hold")
+                _dl(_df_h, "assignments_on_hold", "zip_hold")
+
+     
     with tab2:
-        if not tu.empty:
-            center_table(tu, key="tu_tbl_zip")
-            t_opts=[c for c in ["No of Assignments Assigned","No of Lessons Accessed","No of logins"] if c in tu.columns]
-            if t_opts and "Name" in tu.columns:
-                tm=st.selectbox("Chart metric", t_opts, key="tu_metric_zip")
-                by = (tu.groupby("Name")[tm].sum(numeric_only=True).sort_values(ascending=False).head(12)).reset_index()
-                by[tm]=pd.to_numeric(by[tm], errors="coerce").fillna(0).astype(int)
-                render_altair(bar_with_labels(by, x="Name", y=tm, horizontal=True, height=460, width=900), "TU chart")
-        else:
-            st.info("Provide Teachers Usage (optional) for TU.")
+        st.markdown("### TU preview")
 
-    with tab3:
-        if not lv.empty:
-            center_table(lv, key="lv_tbl_zip")
-            metric="No of Lessons Accessed"
-            if {"Class",metric}.issubset(lv.columns):
-                tmp=lv[["Class",metric]].copy()
-                tmp["GRADE"]=tmp["Class"].astype(str).str.extract(r"(\d+)").fillna("Other")
-                st.subheader("Levelwise — per-grade charts")
-                for g in sorted(tmp["GRADE"].unique(), key=lambda x:(x=="Other", float(x) if str(x).isdigit() else 9999)):
-                    sub=tmp[tmp["GRADE"]==g].sort_values(metric, ascending=False)
-                    if sub.empty: continue
-                    sub=add_class_sort(sub,"Class")
-                    st.markdown(f"**Grade {g}**")
-                    # bar_size=18 -> slimmer bars
-                    render_altair(bar_with_labels(sub, x="Class", y=metric, height=320, width=900, category_sort="_sort", bar_size=18),
-                                  f"Levelwise chart (Grade {g})")
+        tu = st.session_state.get("zip_tu", pd.DataFrame())
+        if not isinstance(tu, pd.DataFrame) or tu.empty:
+            st.info("Provide Teachers Usage (optional) and/or Teacher*Assignment files to build TU.")
         else:
-            st.info("No Levelwise CSVs detected in ZIP.")
+            # ---------- Filters (all in TU; Streamlit keeps you on this tab on rerun) ----------
+            colf1, colf2, colf3, colf4 = st.columns([1,1,1,2])
+            with colf1:
+                only_demo = st.checkbox("Only demo", value=False, key="tu_only_demo")
+            with colf2:
+                hide_demo = st.checkbox("Hide demo", value=False, key="tu_hide_demo")
+            with colf3:
+                hide_na_classes = st.checkbox("Hide NA classes", value=True, key="tu_hide_na_classes")  # (1)
+            with colf4:
+                search = st.text_input("Filter by teacher name (contains)", value="", key="tu_search")
+            # ---------- Zero filters (enabled by default) ----------
+            cza, czb = st.columns([1,1])
+            with cza:
+                hide_zero_lessons = st.checkbox("Hide zero Lessons Accessed", value=True, key="tu_hide_zero_lessons")
+            with czb:
+                hide_zero_assign  = st.checkbox("Hide zero Assignments assigned", value=True, key="tu_hide_zero_assign")
+
+            
+            view = tu.copy()
+
+            # (1) Hide NA in Classes Handled
+            if "Classes Handled" in view.columns and hide_na_classes:
+                view = view[view["Classes Handled"].astype(str).str.strip().str.upper() != "NA"]
+
+            # Demo filters (name or id flagged earlier in build_tu_enhanced)
+            if "Is Demo Teacher" in view.columns:
+                if only_demo:
+                    view = view[view["Is Demo Teacher"]]
+                elif hide_demo:
+                    view = view[~view["Is Demo Teacher"]]
+
+            # Name contains
+            if search:
+                s = search.strip().lower()
+                view = view[view["Name"].astype(str).str.lower().str.contains(s)]
+                
+            # apply the zero filters to the same 'view' df that drives both table and chart
+            if hide_zero_lessons and "No of Lessons Accessed" in view.columns:
+                view = view[pd.to_numeric(view["No of Lessons Accessed"], errors="coerce").fillna(0).astype(int) > 0]
+
+            if hide_zero_assign and "No of Assignments Assigned" in view.columns:
+                view = view[pd.to_numeric(view["No of Assignments Assigned"], errors="coerce").fillna(0).astype(int) > 0]
+
+            # (2) Apply Active: minimum total activity from the ZIP controls to TU as well:
+            # Keep teachers with (Lessons + Assignments) > min_activity when "Active" is selected
+            if mode.startswith("Active"):
+                tot = view.get("No of Lessons Accessed", 0).astype(int) + view.get("No of Assignments Assigned", 0).astype(int)
+                view = view[tot > int(min_activity)]
+            # (We do not apply SU's "Whitelist" to TU; it's grade-based. If you want a TU whitelist by name, say the word.)
+
+            # ---------- Table ----------
+            center_table(view, key="tu_tbl_zip")
+
+            # ---------- Chart (3,4,5) ----------
+            # Show ALL entries with dynamic height
+            nrows = len(view)
+            dyn_h = max(260, min(26 * max(nrows, 1) + 60, 1400))  # scale height, cap at 1400
+
+            # Metric selector, including double-bar option
+            chart_choices = [
+                "No of Assignments Assigned",
+                "No of Lessons Accessed",
+                "No of logins",
+                "Quiz", "Worksheet", "Prasso", "Reading",
+                "Lessons vs Assignments (double bars)"  # (5)
+            ]
+            m = st.selectbox("Chart metric", chart_choices, index=0, key="tu_chart_metric")
+
+            if m == "Lessons vs Assignments (double bars)":
+                # Build grouped horizontal bars with legend for Lessons vs Assignments
+                need_cols = {"No of Lessons Accessed","No of Assignments Assigned"}
+                if need_cols.issubset(view.columns):
+                    plot = (
+                        alt.Chart(
+                            view.rename(columns={
+                                "No of Lessons Accessed":"Lessons",
+                                "No of Assignments Assigned":"Assignments"
+                            })
+                            .melt(id_vars=["Name","Classes Handled"] if "Classes Handled" in view.columns else ["Name"],
+                                  value_vars=["Lessons","Assignments"],
+                                  var_name="Metric", value_name="Value")
+                        )
+                        .mark_bar()
+                        .encode(
+                            y=alt.Y("Name:N", sort='-x'),
+                            yOffset="Metric:N",
+                            x=alt.X("Value:Q", axis=alt.Axis(tickMinStep=1, format=".0f")),
+                            color=alt.Color("Metric:N", legend=alt.Legend(title=None, orient="top")),
+                            tooltip=["Name","Metric","Value"] + (["Classes Handled"] if "Classes Handled" in view.columns else [])
+                        )
+                        .properties(height=dyn_h, width=900)
+                    )
+                    render_altair(plot, "TU double-bar chart")
+                else:
+                    st.info("Lessons/Assignments columns not found for the double-bar chart.")
+            else:
+                # Single metric horizontal bar chart for ALL rows
+                if m in view.columns:
+                    plot_df = view[["Name", m]].copy()
+                    plot_df[m] = pd.to_numeric(plot_df[m], errors="coerce").fillna(0).astype(int)
+                    plot = (
+                        alt.Chart(plot_df)
+                        .mark_bar()
+                        .encode(
+                            y=alt.Y("Name:N", sort='-x'),
+                            x=alt.X(f"{m}:Q", axis=alt.Axis(tickMinStep=1, format=".0f")),
+                            tooltip=["Name", m]
+                        )
+                        .properties(height=dyn_h, width=900)
+                    )
+                    # value labels (optional; can clutter if many rows)
+                    labels = alt.Chart(plot_df).mark_text(align="left", dx=3).encode(
+                        y=alt.Y("Name:N", sort='-x'), x=alt.X(f"{m}:Q"),
+                        text=alt.Text(f"{m}:Q", format=".0f")
+                    )
+                    render_altair((plot + labels).configure_axis(labelLimit=200, grid=True, gridColor="#f2f2f2"), "TU chart")
+                else:
+                    st.info(f"Column '{m}' not found in TU.")
+            # ---------- Downloads ----------
+            csv_bytes = view.to_csv(index=False).encode("utf-8-sig")
+            st.download_button("Download TU.csv", data=csv_bytes, file_name="TU.csv", key="tu_dl_csv")
+            try:
+                xlsx_bytes = _df_to_xlsx_bytes(view, sheet_name="TU")
+                st.download_button("Download TU.xlsx", data=xlsx_bytes,
+                                   file_name="TU.xlsx",
+                                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                   key="tu_dl_xlsx")
+            except Exception:
+                pass
+
+    # with tab3:
+        # lv = st.session_state.get("zip_lv", pd.DataFrame())
+        # if not lv.empty:
+            # center_table(lv, key="lv_tbl_zip")
+            # metric="No of Lessons Accessed"
+            # if {"Class",metric}.issubset(lv.columns):
+                # tmp=lv[["Class",metric]].copy()
+                # tmp["GRADE"]=tmp["Class"].astype(str).str.extract(r"(\d+)").fillna("Other")
+                # st.subheader("Levelwise — per-grade charts")
+                # for g in sorted(tmp["GRADE"].unique(), key=lambda x:(x=="Other", float(x) if str(x).isdigit() else 9999)):
+                    # sub=tmp[tmp["GRADE"]==g].sort_values(metric, ascending=False)
+                    # if sub.empty: continue
+                    # sub=add_class_sort(sub,"Class")
+                    # st.markdown(f"**Grade {g}**")
+                    # render_altair(bar_with_labels(sub, x="Class", y=metric, height=320, width=900, category_sort="_sort", bar_size=18),
+                                  # f"Levelwise chart (Grade {g})")
+        # else:
+            # st.info("No Levelwise CSVs detected in ZIP.")
+            
+    with tab3:
+        st.markdown("### Levelwise preview")
+
+        lv = st.session_state.get("zip_lv", pd.DataFrame())
+        if lv is None or lv.empty:
+            st.info("Drop Level Lessons Usage report(s) to populate Levelwise.")
+        else:
+            # keep only required columns
+            cols = [c for c in ["Level", "Class", "No of Lessons Accessed"] if c in lv.columns]
+            lv_view = lv[cols].copy()
+
+            # === controls ABOVE the table ===
+            show_zero = st.checkbox(
+                "Show sections with 0 lessons",
+                value=False,                 # default: hide zero-lesson sections
+                key="lv_show_zero"
+            )
+
+            # apply the filter BEFORE rendering anything
+            if not show_zero and "No of Lessons Accessed" in lv_view.columns:
+                lv_view = lv_view[
+                    pd.to_numeric(lv_view["No of Lessons Accessed"], errors="coerce")
+                      .fillna(0).astype(int) > 0
+                ]
+
+            # === table (now reflects the filter) ===
+            center_table(lv_view, key="lv_tbl_zip")
+
+            # === one chart per Level (uses filtered lv_view) ===
+            if {"Level", "Class", "No of Lessons Accessed"}.issubset(lv_view.columns):
+                def _lvl_key(s):
+                    m = re.search(r"\d+", str(s))
+                    return (int(m.group()) if m else 999, str(s))
+                levels = sorted(lv_view["Level"].dropna().unique().tolist(), key=_lvl_key)
+
+                for lvl in levels:
+                    sub = lv_view[lv_view["Level"] == lvl][["Class", "No of Lessons Accessed"]].copy()
+                    if sub.empty:
+                        continue
+                    sub = add_class_sort(sub, "Class")
+                    sub["No of Lessons Accessed"] = (
+                        pd.to_numeric(sub["No of Lessons Accessed"], errors="coerce").fillna(0).astype(int)
+                    )
+                    dyn_h = max(260, min(28 * len(sub) + 80, 900))
+                    st.markdown(f"#### {lvl}")
+                    render_altair(
+                        bar_with_labels(
+                            sub, x="Class", y="No of Lessons Accessed",
+                            height=dyn_h, width=900, category_sort="_sort", bar_size=18
+                        ),
+                        f"Levelwise chart — {lvl}",
+                    )
+                    
+
+
+            else:
+                st.info("Levelwise needs columns: Level, Class, No of Lessons Accessed.")
+
+            nrows = len(tmp)
+            dyn_h = max(320, min(28 * max(nrows, 1) + 80, 1200))
+
+            
+
+            # Downloads (table view only)
+            csv_bytes = lv_view.to_csv(index=False).encode("utf-8-sig")
+            st.download_button("Download Levelwise.csv", data=csv_bytes, file_name="Levelwise.csv", key="lv_dl_csv")
+            try:
+                xlsx_bytes = _df_to_xlsx_bytes(lv_view, sheet_name="Levelwise")
+                st.download_button(
+                    "Download Levelwise.xlsx", data=xlsx_bytes, file_name="Levelwise.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="lv_dl_xlsx"
+                )
+            except Exception:
+                pass
+
 
     with tab4:
+        asr = st.session_state.get("zip_asr", pd.DataFrame())
         if not asr.empty:
             center_table(asr[["Class","Quiz Adaptive Practice","Quiz Standard Practice","Quiz Test","Total (Quiz)","ONGOING_AQC","AQC Diff (Total-ONGOING_AQC)","AQC Match?"]], key="asr_tbl_zip")
             req = ["Class","Quiz Adaptive Practice","Quiz Standard Practice","Quiz Test"]
@@ -632,14 +1775,14 @@ with tab_zip:
                     "Type:N",
                     scale=alt.Scale(
                         domain=["Quiz Adaptive Practice","Quiz Standard Practice","Quiz Test"],
-                        range=["#4C78A8", "#F58518", "#54A24B"]  # three distinct colours
+                        range=["#4C78A8", "#F58518", "#54A24B"]
                     ),
                     legend=alt.Legend(title=None, orient="top")
                 )
 
                 chart = alt.Chart(long).mark_bar().encode(
                     x=alt.X("Class:N", sort=sort_obj),
-                    xOffset="Type:N",                    # grouped/clustered bars
+                    xOffset="Type:N",
                     y=alt.Y("Count:Q", axis=axis_q),
                     color=color,
                     tooltip=["Class","Type","Count"]
@@ -674,11 +1817,13 @@ with tab_csv:
                               type=["csv"], accept_multiple_files=True, key="lvl")
 
     st.markdown("### Assignment Summary inputs (CSV mode)")
+    demo_book_csv = st.file_uploader("Upload Demo_ids_classesHandled.xlsx (optional for demo teacher/student ids)", type=["xlsx"], key="csv_demo_book")
     sa_up   = st.file_uploader("School Assignments Usage Report (CSV)", type=["csv"], key="asr_sa_csv")
     tqa_ups = st.file_uploader("Teacher Quiz Assignment CSVs (one per class)", type=["csv"], accept_multiple_files=True, key="asr_tqa_csv")
 
     if sa_up:
         sa_df = read_csv_flex_from_bytes(sa_up.read())
+        st.session_state["csv_school_assign_df"] = sa_df
         tqa_map={}
         for f in (tqa_ups or []):
             m=re.match(r"TeacherQuizAssignment_(.+?)_", f.name)
@@ -703,7 +1848,12 @@ with tab_csv:
 
         tu = build_tu(t_df)
         frames=[read_csv_flex_from_bytes(f.read()) for f in (lvl_up or [])]
-        lv = build_levelwise_from_frames(frames, logins_df=g_df)
+        lv = build_levelwise_with_assignments(
+            lesson_frames=frames,
+            school_assign_df=st.session_state.get("csv_school_assign_df"),
+            logins_df=g_df
+        )
+
 
         st.session_state["csv_su"]=su; st.session_state["csv_tu"]=tu; st.session_state["csv_lv"]=lv
 
@@ -736,22 +1886,73 @@ with tab_csv:
             st.info("Upload Teachers Usage (optional) and click Build to see TU.")
 
     with tab3:
+        lv = st.session_state.get("zip_lv", pd.DataFrame())
         if not lv.empty:
-            center_table(lv, key="lv_tbl_csv")
-            metric="No of Lessons Accessed"
-            if {"Class",metric}.issubset(lv.columns):
-                tmp=lv[["Class",metric]].copy(); tmp["GRADE"]=tmp["Class"].astype(str).str.extract(r"(\d+)").fillna("Other")
-                st.subheader("Levelwise — per-grade charts")
-                for g in sorted(tmp["GRADE"].unique(), key=lambda x:(x=="Other", float(x) if str(x).isdigit() else 9999)):
-                    sub=tmp[tmp["GRADE"]==g].sort_values(metric, ascending=False)
-                    if sub.empty: continue
-                    sub=add_class_sort(sub,"Class")
-                    st.markdown(f"**Grade {g}**")
-                    render_altair(bar_with_labels(sub, x="Class", y=metric, height=320, width=900), f"Levelwise chart (Grade {g})")
+            
+            # Table stays as-is
+            center_table(lv, key="lv_tbl_zip")
+
+            # ── Chart selector: single metrics or a double-bar option ──
+            chart_choice = st.selectbox(
+                "Chart",
+                ["No of Lessons Accessed", "Assignments Assigned", "Lessons vs Assignments (double bars)"],
+                index=0,
+                key="lv_chart_choice",
+            )
+
+            # dynamic height so all classes fit comfortably
+            nrows = len(lv)
+            dyn_h = max(320, min(28 * max(nrows, 1) + 80, 1200))
+
+            if chart_choice == "Lessons vs Assignments (double bars)":
+                need = {"Class", "No of Lessons Accessed", "Assignments Assigned"}
+                if need.issubset(lv.columns):
+                    tmp = lv[["Class", "No of Lessons Accessed", "Assignments Assigned"]].copy()
+                    tmp = add_class_sort(tmp, "Class")  # adds _sort for natural class order
+
+                    # reshape for grouped bars
+                    mdf = tmp.melt(
+                        id_vars=["Class", "_sort"],
+                        value_vars=["No of Lessons Accessed", "Assignments Assigned"],
+                        var_name="Metric",
+                        value_name="Value",
+                    )
+                    mdf["Value"] = pd.to_numeric(mdf["Value"], errors="coerce").fillna(0).astype(int)
+
+                    # grouped vertical bars with legend & tooltip
+                    chart = (
+                        alt.Chart(mdf)
+                        .mark_bar()
+                        .encode(
+                            x=alt.X("Class:N", sort=alt.SortField(field="_sort", order="ascending")),
+                            xOffset="Metric:N",
+                            y=alt.Y("Value:Q", axis=alt.Axis(tickMinStep=1, format=".0f")),
+                            color=alt.Color("Metric:N", legend=alt.Legend(title=None, orient="top")),
+                            tooltip=["Class", "Metric", "Value"],
+                        )
+                        .properties(height=dyn_h, width=900)
+                    )
+                    render_altair(chart, "Levelwise double-bar chart")
+                else:
+                    missing = need - set(lv.columns)
+                    st.info(f"Missing column(s) for double-bar chart: {', '.join(missing)}")
             else:
-                st.info("Expected columns 'Class' and 'No of Lessons Accessed'.")
+                # single-metric chart (your existing style)
+                metric = chart_choice  # either Lessons or Assignments
+                if {"Class", metric}.issubset(lv.columns):
+                    tmp = lv[["Class", metric]].copy()
+                    tmp = add_class_sort(tmp, "Class")
+                    tmp[metric] = pd.to_numeric(tmp[metric], errors="coerce").fillna(0).astype(int)
+                    render_altair(
+                        bar_with_labels(tmp, x="Class", y=metric, height=dyn_h, width=900, category_sort="_sort", bar_size=18),
+                        f"Levelwise chart ({metric})",
+                    )
+                else:
+                    st.info(f"Column '{metric}' not found in Levelwise.")
+
         else:
-            st.info("Upload Level Lessons files and click Build to see Levelwise.")
+            st.info("No Levelwise files found.")
+
 
     with tab4:
         if not asr.empty:
