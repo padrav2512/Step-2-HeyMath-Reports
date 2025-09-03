@@ -1563,6 +1563,7 @@ with tab_zip:
 
             
             view = tu.copy()
+            
 
             # (1) Hide NA in Classes Handled
             if "Classes Handled" in view.columns and hide_na_classes:
@@ -1795,12 +1796,40 @@ with tab_zip:
     with tab4:
         asr = st.session_state.get("zip_asr", pd.DataFrame())
         if not asr.empty:
-            center_table(asr[["Class","Quiz Adaptive Practice","Quiz Standard Practice","Quiz Test","Total (Quiz)","ONGOING_AQC","AQC Diff (Total-ONGOING_AQC)","AQC Match?"]], key="asr_tbl_zip")
+            # --- ASR hide-all-zero rows (CSV) ---
+            asr_hide_zeros_csv = st.checkbox(
+                "Hide rows where Quiz Adaptive/Standard/Test are all zero",
+                value=True, key="asr_hide_zeros_csv"
+            )
+            asr_view = asr.copy()
+            if asr_hide_zeros_csv:
+                qap = pd.to_numeric(asr_view.get("Quiz Adaptive Practice", 0), errors="coerce").fillna(0).astype(int)
+                qsp = pd.to_numeric(asr_view.get("Quiz Standard Practice", 0), errors="coerce").fillna(0).astype(int)
+                qt  = pd.to_numeric(asr_view.get("Quiz Test", 0),             errors="coerce").fillna(0).astype(int)
+                asr_view = asr_view[(qap > 0) | (qsp > 0) | (qt > 0)]
+
+            center_table(asr_view[["Class","Quiz Adaptive Practice","Quiz Standard Practice","Quiz Test","Total (Quiz)","ONGOING_AQC","AQC Diff (Total-ONGOING_AQC)","AQC Match?"]], key="asr_tbl_csv")
+
+            # # --- ASR hide-all-zero rows (ZIP) ---
+            # asr_hide_zeros_zip = st.checkbox(
+                # "Hide rows where Quiz Adaptive/Standard/Test are all zero",
+                # value=True, key="asr_hide_zeros_zip"
+            # )
+            # asr_view = asr.copy()
+            # if asr_hide_zeros_zip:
+                # qap = pd.to_numeric(asr_view.get("Quiz Adaptive Practice", 0), errors="coerce").fillna(0).astype(int)
+                # qsp = pd.to_numeric(asr_view.get("Quiz Standard Practice", 0), errors="coerce").fillna(0).astype(int)
+                # qt  = pd.to_numeric(asr_view.get("Quiz Test", 0),             errors="coerce").fillna(0).astype(int)
+                # asr_view = asr_view[(qap > 0) | (qsp > 0) | (qt > 0)]
+
+            # center_table(asr_view[["Class","Quiz Adaptive Practice","Quiz Standard Practice","Quiz Test","Total (Quiz)","ONGOING_AQC","AQC Diff (Total-ONGOING_AQC)","AQC Match?"]], key="asr_tbl_zip")
+
             req = ["Class","Quiz Adaptive Practice","Quiz Standard Practice","Quiz Test"]
-            if all(c in asr.columns for c in req):
-                long = add_class_sort(asr[req].copy(), "Class").melt(
+            if all(c in asr_view.columns for c in req):
+                long = add_class_sort(asr_view[req].copy(), "Class").melt(
                     id_vars=["Class","_sort"], var_name="Type", value_name="Count"
                 )
+                 
                 long["Count"] = pd.to_numeric(long["Count"], errors="coerce").fillna(0).astype(int)
 
                 sort_obj = alt.SortField(field="_sort", order="ascending")
@@ -1822,7 +1851,7 @@ with tab_zip:
                     color=color,
                     tooltip=["Class","Type","Count"]
                 ).properties(width=900, height=380)
-
+                
                 labels = alt.Chart(long).mark_text(dy=-5).encode(
                     x=alt.X("Class:N", sort=sort_obj),
                     xOffset="Type:N",
@@ -1910,6 +1939,23 @@ with tab_csv:
 
     with tab2:
         if not tu.empty:
+            # --- TU (CSV) zero filters ---
+            cz1, cz2 = st.columns([1,1])
+            with cz1:
+                tu_hide_zero_lessons_csv = st.checkbox(
+                    "Hide zero Lessons Accessed", value=True, key="tu_hide_zero_lessons_csv"
+                )
+            with cz2:
+                tu_hide_zero_assign_csv = st.checkbox(
+                    "Hide zero Assignments assigned", value=True, key="tu_hide_zero_assign_csv"
+                )
+
+            tu_view = tu.copy()
+            if tu_hide_zero_lessons_csv and "No of Lessons Accessed" in tu_view.columns:
+                tu_view = tu_view[pd.to_numeric(tu_view["No of Lessons Accessed"], errors="coerce").fillna(0).astype(int) > 0]
+            if tu_hide_zero_assign_csv and "No of Assignments Assigned" in tu_view.columns:
+                tu_view = tu_view[pd.to_numeric(tu_view["No of Assignments Assigned"], errors="coerce").fillna(0).astype(int) > 0]
+
             center_table(tu, key="tu_tbl_csv")
             t_opts=[c for c in ["No of Assignments Assigned","No of Lessons Accessed","No of logins"] if c in tu.columns]
             if t_opts and "Name" in tu.columns:
@@ -2004,9 +2050,11 @@ with tab_csv:
     with tab4:
         if not asr.empty:
             center_table(asr[["Class","Quiz Adaptive Practice","Quiz Standard Practice","Quiz Test","Total (Quiz)","ONGOING_AQC","AQC Diff (Total-ONGOING_AQC)","AQC Match?"]], key="asr_tbl_csv")
-            req=["Class","Quiz Adaptive Practice","Quiz Standard Practice","Quiz Test"]
-            if all(c in asr.columns for c in req):
-                long=add_class_sort(asr[req].copy(),"Class").melt(id_vars=["Class","_sort"], var_name="Type", value_name="Count")
+            req = ["Class","Quiz Adaptive Practice","Quiz Standard Practice","Quiz Test"]
+            if all(c in asr_view.columns for c in req):
+                long = add_class_sort(asr_view[req].copy(), "Class").melt(
+                    id_vars=["Class","_sort"], var_name="Type", value_name="Count"
+                )
                 long["Count"]=pd.to_numeric(long["Count"], errors="coerce").fillna(0).astype(int)
                 sort_obj = alt.SortField(field="_sort", order="ascending")
                 color = alt.Color(
