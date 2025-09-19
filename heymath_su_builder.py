@@ -992,9 +992,16 @@ def _clean_detail_table(df: pd.DataFrame, drop_mode: bool = False) -> pd.DataFra
 CLASS_START = re.compile(r'^\s*(class|standard|std|grade|igcse|cam)\s*0*(1[0-2]|[1-9])', re.I)
 def _token_is_class(token: str) -> bool:
     return bool(CLASS_START.match(str(token or "")))
+
 def _split_tokens(val) -> list[str]:
-    toks = [t.strip() for t in str(val or "").split(",") if str(t).strip()]
+    s = str(val or "")
+    # If someone forgot a comma before a class tag (… "Honey bee Class 8C"),
+    # insert a comma before known class prefixes followed by a digit.
+    s = re.sub(r'(?<![,])\s+(?=(?:class|standard|std|grade)\s*0*(?:1[0-2]|[1-9]))', ', ', s, flags=re.I)
+    # Split on ASCII comma or fullwidth comma, allowing stray spaces
+    toks = [t.strip() for t in re.split(r'\s*[,，]\s*', s) if t.strip()]
     return toks or ["__EMPTY__"]
+
 
 def _count_assignments_from_map(
     
@@ -1145,8 +1152,9 @@ def build_su_from_teacher_maps(
     include_hold:   bool = False,
     include_indiv:  bool = False,
     demo_teacher_ids: set | None = None,
-    demo_student_ids: set | None = None
+    demo_student_ids: set | None = None, demo_students_by_class: dict[str,int] | None = None
 ):
+
     if logins_df is None or logins_df.empty:
         raise ValueError('School Logins Report missing/empty')
     need=['LEVEL','LEVEL_DISPLAY_NAME','TOTAL_STUDENTS','TOTAL_LOGINS']
@@ -1200,13 +1208,29 @@ def build_su_from_teacher_maps(
     for c in cols:
         if c not in out.columns: out[c]=0
     out = out[cols]
+    # --- NEW: subtract demo-student counts per class in SU ---
+    if demo_students_by_class:
+        adj = out.copy()
+        adj["_norm_class"] = adj["Class"].map(normalize_class)
+        adj["No of Students"] = (
+            adj.apply(
+                lambda r: max(
+                    0,
+                    int(r["No of Students"]) - int(demo_students_by_class.get(r["_norm_class"], 0))
+                ),
+                axis=1
+            )
+        )
+        out = adj.drop(columns=["_norm_class"])
 
     det = {k: pd.DataFrame(v, columns=["Class","Type","Teacher","Assignment Name","Mode","Recipient Token"]) for k,v in detail_rows.items()}
     return out, det
 
 # ---- Demo ids / Classes Handled workbook loader ----
-def load_demo_book(xls_bytes) -> tuple[set, set, dict]:
+def load_demo_book(xls_bytes) -> tuple[set, set, dict, dict]:
     demo_t, demo_s, classes_map = set(), set(), {}
+    demo_students_by_class: dict[str,int] = {}
+
     try:
         xls = pd.ExcelFile(io.BytesIO(xls_bytes))
     except Exception:
@@ -1238,7 +1262,37 @@ def load_demo_book(xls_bytes) -> tuple[set, set, dict]:
                 cls = first_text_col(df)
                 if cls:
                     classes_map.setdefault("_all", []).extend([str(x).strip() for x in cls if str(x).strip()])
-    return demo_t, demo_s, classes_map
+        # --- NEW: demo student counts per class (sheet: demo_stud_ids) ---
+        try:
+            if "demo_stud_ids" in xls.sheet_names:
+                df = pd.read_excel(xls, sheet_name="demo_stud_ids")
+                # Pick the class column heuristically
+                # (accepts 'Class', 'Level', 'LEVEL_DISPLAY_NAME' or the first text-like column)
+                cls_col = None
+                for c in ["Class","CLASS","Level","LEVEL","LEVEL_DISPLAY_NAME"]:
+                    if c in df.columns: 
+                        cls_col = c
+                        break
+                if cls_col is None:
+                    for c in df.columns:
+                        if df[c].astype(str).str.strip().ne("").any():
+                            cls_col = c
+                            break
+
+                if cls_col:
+                    # normalize class labels using your existing helper
+                    df["_norm_class"] = df[cls_col].astype(str).map(normalize_class)
+                    demo_students_by_class = (
+                        df[df["_norm_class"].astype(str).str.strip().ne("")]
+                          .groupby("_norm_class")["_norm_class"]
+                          .size()
+                          .to_dict()
+                    )
+        except Exception:
+            pass
+
+    return demo_t, demo_s, classes_map, demo_students_by_class
+
 
 def _df_to_csv_bytes(df):
     return df.to_csv(index=False).encode("utf-8")
@@ -1323,6 +1377,21 @@ with tab_zip:
                     st.caption("Loaded demo workbook from local file: Demo_ids_classesHandled.xlsx")
                 elif demo_book:
                     st.caption(f"Loaded demo workbook from upload: {demo_book.name}")
+                # --- NEW: count demo students by class (normalized label) ---
+                demo_students_by_class = {}
+                try:
+                    if "demo_stud_ids" in xls.sheet_names:
+                        sdf = pd.read_excel(xls, "demo_stud_ids")
+                        # Pick a class-like column robustly (you already have pick_col + normalize_class)
+                        cls_col = pick_col(sdf, "Class","LEVEL_DISPLAY_NAME","LEVEL","Level","class")
+                        if cls_col:
+                            sdf["_norm_class"] = sdf[cls_col].astype(str).map(normalize_class)
+                            demo_students_by_class = sdf["_norm_class"].value_counts().to_dict()
+                except Exception:
+                    demo_students_by_class = {}
+
+                # Keep it for later use (re-renders)
+                st.session_state["zip_demo_students_by_class"] = demo_students_by_class
 
             except Exception as e:
                 st.warning(f"Could not read Demo_ids_classesHandled.xlsx ({type(e).__name__}). Proceeding without demo ids.")
@@ -1346,24 +1415,41 @@ with tab_zip:
             combined_demo_teachers = {s.strip().lower() for s in demo_t_ids} | {s.strip().lower() for s in demo_t_names}
 
             # Initial SU (all toggles off by default)
+            
             su, su_details = build_su_from_teacher_maps(
                 g_df, l_df, t_map,
                 include_demo_t=False, include_demo_s=False, include_hold=False, include_indiv=False,
                 demo_teacher_ids=combined_demo_teachers,
                 demo_student_ids=demo_s_ids
             )
-            with st.expander("Debug: Teacher assignment files found"):
-                for kind, m in (t_map or {}).items():
-                    classes = sorted([k for k, df in (m or {}).items() if df is not None and not df.empty])
-                    st.write(f"{kind}: {classes}")
 
-            if mode.startswith("Active"):
-                su=filter_active_grades(su, min_students, min_activity)
-            elif mode=="Whitelist":
-                allow={g.strip().lower() for g in whitelist.split(",") if g.strip()}
-                if allow: su=su[su["Class"].str.lower().isin(allow)]
-
+        
+            # --- NEW: subtract per-class demo-student counts from SU "No of Students" ---
+            dsbc = st.session_state.get("zip_demo_students_by_class", {})
+            if dsbc and not su.empty and "No of Students" in su.columns and "Class" in su.columns:
+                su["_norm_class"] = su["Class"].astype(str).map(normalize_class)
+                su["No of Students"] = su.apply(
+                    lambda r: max(0, int(r["No of Students"]) - int(dsbc.get(r["_norm_class"], 0))),
+                    axis=1
+                )
+                su.drop(columns=["_norm_class"], inplace=True)
+# # (optional) quick debug of teacher-assignment files found
+            # if st.checkbox("Show TU debug", value=False, key="tu_dbg_toggle"):
+                # with st.expander("Debug: Teacher assignment files found"):
+                    # for kind, m in (t_map or {}).items():
+                        # classes = sorted([k for k, df in (m or {}).items() if df is not None and not df.empty])
+                        # st.write(f"{kind}: {classes}")
             
+
+            # --- SU filters ---
+            if mode.startswith("Active"):
+                su = filter_active_grades(su, min_students, min_activity)
+            elif mode == "Whitelist":
+                allow = {g.strip().lower() for g in whitelist.split(",") if g.strip()}
+                if allow:
+                    su = su[su["Class"].str.lower().isin(allow)]
+
+        
             combined_demo_teachers = {s.strip().lower() for s in demo_t_ids} | {s.strip().lower() for s in demo_t_names}
             tu = build_tu_enhanced(
                 teachers_df=t_df,
@@ -1372,6 +1458,15 @@ with tab_zip:
                 demo_teachers=combined_demo_teachers,
                 classes_map=st.session_state.get("zip_classes_map", {})  # <-- uses what we just stored
             )
+            # Recompute total assignments from components (ZIP TU)
+            for _c in ["Quiz", "Worksheet", "Prasso", "Reading"]:
+                if _c not in tu.columns:
+                    tu[_c] = 0
+            tu["No of Assignments Assigned"] = (
+                pd.to_numeric(tu["Quiz"], errors="coerce").fillna(0).astype(int)
+                + pd.to_numeric(tu["Worksheet"], errors="coerce").fillna(0).astype(int)
+                + pd.to_numeric(tu["Prasso"], errors="coerce").fillna(0).astype(int)
+                + pd.to_numeric(tu["Reading"], errors="coerce").fillna(0).astype(int))
 
 
             st.session_state["zip_tu"] = tu
@@ -1549,9 +1644,9 @@ with tab_zip:
             with colf1:
                 only_demo = st.checkbox("Only demo", value=False, key="tu_only_demo")
             with colf2:
-                hide_demo = st.checkbox("Hide demo", value=False, key="tu_hide_demo")
+                hide_demo = st.checkbox("Hide demo", value=True, key="tu_hide_demo")
             with colf3:
-                hide_na_classes = st.checkbox("Hide NA classes", value=True, key="tu_hide_na_classes")  # (1)
+                hide_na_classes = st.checkbox("Hide NA classes", value=False, key="tu_hide_na_classes")  # (1)
             with colf4:
                 search = st.text_input("Filter by teacher name (contains)", value="", key="tu_search")
             # ---------- Zero filters (enabled by default) ----------
@@ -1563,7 +1658,17 @@ with tab_zip:
 
             
             view = tu.copy()
-            
+            # Recompute total assignments from components (ZIP TU view)
+            for _c in ["Quiz", "Worksheet", "Prasso", "Reading"]:
+                if _c not in view.columns:
+                    view[_c] = 0
+            view["No of Assignments Assigned"] = (
+                pd.to_numeric(view["Quiz"], errors="coerce").fillna(0).astype(int)
+                + pd.to_numeric(view["Worksheet"], errors="coerce").fillna(0).astype(int)
+                + pd.to_numeric(view["Prasso"], errors="coerce").fillna(0).astype(int)
+                + pd.to_numeric(view["Reading"], errors="coerce").fillna(0).astype(int)
+)
+
 
             # (1) Hide NA in Classes Handled
             if "Classes Handled" in view.columns and hide_na_classes:
@@ -1577,7 +1682,7 @@ with tab_zip:
                     view = view[~view["Is Demo Teacher"]]
 
             # Name contains
-            if search:
+            if search and "Name" in view.columns:
                 s = search.strip().lower()
                 view = view[view["Name"].astype(str).str.lower().str.contains(s)]
                 
@@ -1589,10 +1694,14 @@ with tab_zip:
                 view = view[pd.to_numeric(view["No of Assignments Assigned"], errors="coerce").fillna(0).astype(int) > 0]
 
             # (2) Apply Active: minimum total activity from the ZIP controls to TU as well:
-            # Keep teachers with (Lessons + Assignments) > min_activity when "Active" is selected
+           
             if mode.startswith("Active"):
-                tot = view.get("No of Lessons Accessed", 0).astype(int) + view.get("No of Assignments Assigned", 0).astype(int)
+                lessons = pd.to_numeric(view.get("No of Lessons Accessed"), errors="coerce").fillna(0)
+                assigns = pd.to_numeric(view.get("No of Assignments Assigned"), errors="coerce").fillna(0)
+                tot = lessons.add(assigns, fill_value=0)
                 view = view[tot > int(min_activity)]
+
+
             # (We do not apply SU's "Whitelist" to TU; it's grade-based. If you want a TU whitelist by name, say the word.)
 
             # ---------- Table ----------
@@ -1664,35 +1773,111 @@ with tab_zip:
                 else:
                     st.info(f"Column '{m}' not found in TU.")
             # ---------- Downloads ----------
-            csv_bytes = view.to_csv(index=False).encode("utf-8-sig")
-            st.download_button("Download TU.csv", data=csv_bytes, file_name="TU.csv", key="tu_dl_csv")
-            try:
-                xlsx_bytes = _df_to_xlsx_bytes(view, sheet_name="TU")
-                st.download_button("Download TU.xlsx", data=xlsx_bytes,
-                                   file_name="TU.xlsx",
-                                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                   key="tu_dl_xlsx")
-            except Exception:
-                pass
+            tu_dl = view.drop(columns=["Is Demo teacher", "Is Demo Teacher", "Is Demo"], errors="ignore")
+            st.download_button("Download TU.csv",
+                               data=tu_dl.to_csv(index=False).encode("utf-8-sig"),
+                               file_name="TU.csv", key="tu_dl_csv.zip")
+            # === Downloads (Consolidated & individual CSVs) ===
 
-    # with tab3:
-        # lv = st.session_state.get("zip_lv", pd.DataFrame())
-        # if not lv.empty:
-            # center_table(lv, key="lv_tbl_zip")
-            # metric="No of Lessons Accessed"
-            # if {"Class",metric}.issubset(lv.columns):
-                # tmp=lv[["Class",metric]].copy()
-                # tmp["GRADE"]=tmp["Class"].astype(str).str.extract(r"(\d+)").fillna("Other")
-                # st.subheader("Levelwise — per-grade charts")
-                # for g in sorted(tmp["GRADE"].unique(), key=lambda x:(x=="Other", float(x) if str(x).isdigit() else 9999)):
-                    # sub=tmp[tmp["GRADE"]==g].sort_values(metric, ascending=False)
-                    # if sub.empty: continue
-                    # sub=add_class_sort(sub,"Class")
-                    # st.markdown(f"**Grade {g}**")
-                    # render_altair(bar_with_labels(sub, x="Class", y=metric, height=320, width=900, category_sort="_sort", bar_size=18),
-                                  # f"Levelwise chart (Grade {g})")
-        # else:
-            # st.info("No Levelwise CSVs detected in ZIP.")
+            # Pick the first non-empty DataFrame from (zip, csv); else empty
+            def _pick_df(*candidates):
+                for d in candidates:
+                    if isinstance(d, pd.DataFrame) and not d.empty:
+                        return d
+                return pd.DataFrame()
+
+            dl_su  = _pick_df(st.session_state.get("zip_su"),  st.session_state.get("csv_su"))
+            dl_tu  = _pick_df(st.session_state.get("zip_tu"),  st.session_state.get("csv_tu"))
+            dl_lv  = _pick_df(st.session_state.get("zip_lv"),  st.session_state.get("csv_lv"))
+            dl_asr = _pick_df(st.session_state.get("zip_asr"), st.session_state.get("csv_asr"))
+
+            # Build Consolidated.xlsx in-memory
+            xbuf = io.BytesIO()
+            with pd.ExcelWriter(xbuf, engine="openpyxl") as w:
+                # SU sheet (as is)
+                (dl_su if isinstance(dl_su, pd.DataFrame) else pd.DataFrame()).to_excel(w, "SU", index=False)
+
+                # TU sheet (drop demo cols, recompute total)
+                _dl_tu = dl_tu.copy() if isinstance(dl_tu, pd.DataFrame) else pd.DataFrame()
+                for _c in ["Quiz", "Worksheet", "Prasso", "Reading"]:
+                    if _c not in _dl_tu.columns:
+                        _dl_tu[_c] = 0
+                if not _dl_tu.empty:
+                    _dl_tu["No of Assignments Assigned"] = (
+                        pd.to_numeric(_dl_tu["Quiz"], errors="coerce").fillna(0).astype(int)
+                        + pd.to_numeric(_dl_tu["Worksheet"], errors="coerce").fillna(0).astype(int)
+                        + pd.to_numeric(_dl_tu["Prasso"], errors="coerce").fillna(0).astype(int)
+                        + pd.to_numeric(_dl_tu["Reading"], errors="coerce").fillna(0).astype(int)
+                    )
+                _dl_tu = _dl_tu.drop(columns=["Is Demo teacher","Is Demo Teacher","Is Demo"], errors="ignore")
+                _dl_tu.to_excel(w, "TU", index=False)
+
+                # Levelwise & Assignment Summary as is
+                (dl_lv if isinstance(dl_lv, pd.DataFrame) else pd.DataFrame()).to_excel(w, "Levelwise", index=False)
+                (dl_asr if isinstance(dl_asr, pd.DataFrame) else pd.DataFrame()).to_excel(w, "Assignment Summary", index=False)
+
+            consolidated_bytes = xbuf.getvalue()
+            st.download_button(
+                "Download Consolidated.xlsx",
+                data=consolidated_bytes,
+                file_name="Consolidated.xlsx",
+                key="dl_consolidated_xlsx_unique"
+            )
+
+            # Individual CSV downloads (match what’s in consolidated)
+            c1, c2 = st.columns(2)
+            with c1:
+                if not dl_su.empty:
+                    st.download_button(
+                        "Download SU.csv",
+                        data=dl_su.to_csv(index=False).encode("utf-8-sig"),
+                        file_name="SU.csv",
+                        key="dl_su_csv_unique"
+                    )
+                if not dl_lv.empty:
+                    st.download_button(
+                        "Download Levelwise.csv",
+                        data=dl_lv.to_csv(index=False).encode("utf-8-sig"),
+                        file_name="Levelwise.csv",
+                        key="dl_lv_csv_unique"
+                    )
+            with c2:
+                if not dl_tu.empty:
+                    _dl_tu_csv = dl_tu.copy()
+                    for _c in ["Quiz", "Worksheet", "Prasso", "Reading"]:
+                        if _c not in _dl_tu_csv.columns:
+                            _dl_tu_csv[_c] = 0
+                    _dl_tu_csv["No of Assignments Assigned"] = (
+                        pd.to_numeric(_dl_tu_csv["Quiz"], errors="coerce").fillna(0).astype(int)
+                        + pd.to_numeric(_dl_tu_csv["Worksheet"], errors="coerce").fillna(0).astype(int)
+                        + pd.to_numeric(_dl_tu_csv["Prasso"], errors="coerce").fillna(0).astype(int)
+                        + pd.to_numeric(_dl_tu_csv["Reading"], errors="coerce").fillna(0).astype(int)
+                    )
+                    _dl_tu_csv = _dl_tu_csv.drop(columns=["Is Demo teacher","Is Demo Teacher","Is Demo"], errors="ignore")
+                    st.download_button(
+                        "Download TU.csv",
+                        data=_dl_tu_csv.to_csv(index=False).encode("utf-8-sig"),
+                        file_name="TU.csv",
+                        key="dl_tu_csv_unique"
+                    )
+                if not dl_asr.empty:
+                    st.download_button(
+                        "Download AssignmentSummary.csv",
+                        data=dl_asr.to_csv(index=False).encode("utf-8-sig"),
+                        file_name="AssignmentSummary.csv",
+                        key="dl_asr_csv_unique"
+                    )
+
+                try:
+                    xlsx_bytes = _df_to_xlsx_bytes(view, sheet_name="TU")
+                    st.download_button("Download TU.xlsx", data=xlsx_bytes,
+                                       file_name="TU.xlsx",
+                                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                       key="tu_dl_xlsx")
+                except Exception:
+                    pass
+
+    
             
     with tab3:
         st.markdown("### Levelwise preview")
@@ -1780,8 +1965,14 @@ with tab_zip:
             
 
             # Downloads (table view only)
-            csv_bytes = lv_view.to_csv(index=False).encode("utf-8-sig")
-            st.download_button("Download Levelwise.csv", data=csv_bytes, file_name="Levelwise.csv", key="lv_dl_csv")
+           
+            # tu_dl = view.drop(columns=["Is Demo teacher", "Is Demo Teacher", "Is Demo"], errors="ignore")
+            # st.download_button("Download TU.csv",
+                               # data=tu_dl.to_csv(index=False).encode("utf-8-sig"),
+                               # file_name="TU.csv", key="tu_dl_csv.zip")
+
+            
+            
             try:
                 xlsx_bytes = _df_to_xlsx_bytes(lv_view, sheet_name="Levelwise")
                 st.download_button(
@@ -1881,45 +2072,96 @@ with tab_csv:
                               type=["csv"], accept_multiple_files=True, key="lvl")
 
     st.markdown("### Assignment Summary inputs (CSV mode)")
-    demo_book_csv = st.file_uploader("Upload Demo_ids_classesHandled.xlsx (optional for demo teacher/student ids)", type=["xlsx"], key="csv_demo_book")
+    demo_book_csv = st.file_uploader(
+        "Upload Demo_ids_classesHandled.xlsx (optional for demo teacher/student ids)",
+        type=["xlsx"], key="csv_demo_book"
+    )
     sa_up   = st.file_uploader("School Assignments Usage Report (CSV)", type=["csv"], key="asr_sa_csv")
-    tqa_ups = st.file_uploader("Teacher Quiz Assignment CSVs (one per class)", type=["csv"], accept_multiple_files=True, key="asr_tqa_csv")
+    tqa_ups = st.file_uploader("Teacher Quiz Assignment CSVs (one per class)", type=["csv"],
+                               accept_multiple_files=True, key="asr_tqa_csv")
 
+    # --- NEW: count demo-students per class for CSV flow ---
+    demo_students_by_class_csv = {}
+    if demo_book_csv:
+        try:
+            xls = pd.ExcelFile(io.BytesIO(demo_book_csv.read()))
+            if "demo_stud_ids" in xls.sheet_names:
+                sdf = pd.read_excel(xls, "demo_stud_ids")
+                cls_col = pick_col(sdf, "Class","LEVEL_DISPLAY_NAME","LEVEL","Level","class")
+                if cls_col:
+                    sdf["_norm_class"] = sdf[cls_col].astype(str).map(normalize_class)
+                    demo_students_by_class_csv = sdf["_norm_class"].value_counts().to_dict()
+        except Exception:
+            pass
+    st.session_state["csv_demo_students_by_class"] = demo_students_by_class_csv
+
+    # Build ASR (CSV) if provided
     if sa_up:
         sa_df = read_csv_flex_from_bytes(sa_up.read())
         st.session_state["csv_school_assign_df"] = sa_df
-        tqa_map={}
+        tqa_map = {}
         for f in (tqa_ups or []):
-            m=re.match(r"TeacherQuizAssignment_(.+?)_", f.name)
+            m = re.match(r"TeacherQuizAssignment_(.+?)_", f.name)
             klass = (m.group(1).strip() if m else f.name)
             tqa_map[normalize_class(klass)] = read_csv_flex_from_bytes(f.read())
         asr = build_asr_quiz_split(sa_df, tqa_map)
-        st.session_state["csv_asr"]=asr
+        st.session_state["csv_asr"] = asr
 
     submitted, mode, min_students, min_activity, whitelist = compact_options_form(prefix_key="csv")
 
     if submitted and a_up and l_up and g_up:
-        a_df=read_csv_flex_from_bytes(a_up.read())
-        l_df=read_csv_flex_from_bytes(l_up.read())
-        g_df=read_csv_flex_from_bytes(g_up.read())
-        t_df=read_csv_flex_from_bytes(t_up.read()) if t_up else None
+        a_df = read_csv_flex_from_bytes(a_up.read())
+        l_df = read_csv_flex_from_bytes(l_up.read())
+        g_df = read_csv_flex_from_bytes(g_up.read())
+        t_df = read_csv_flex_from_bytes(t_up.read()) if t_up else None
 
-        su = build_su(a_df,l_df,g_df)
-        if mode.startswith("Active"): su=filter_active_grades(su, min_students, min_activity)
-        elif mode=="Whitelist":
-            allow={g.strip().lower() for g in whitelist.split(",") if g.strip()}
-            if allow: su=su[su["Class"].str.lower().isin(allow)]
+        # SU from CSVs
+        su = build_su(a_df, l_df, g_df)
 
+        # Subtract demo-student counts (CSV)
+        dsbc = st.session_state.get("csv_demo_students_by_class", {})
+        if dsbc and not su.empty and "No of Students" in su.columns and "Class" in su.columns:
+            su["_norm_class"] = su["Class"].astype(str).map(normalize_class)
+            su["No of Students"] = su.apply(
+                lambda r: max(0, int(r["No of Students"]) - int(dsbc.get(r["_norm_class"], 0))),
+                axis=1
+            )
+            su.drop(columns=["_norm_class"], inplace=True)
+
+        # SU filters
+        if mode.startswith("Active"):
+            su = filter_active_grades(su, min_students, min_activity)
+        elif mode == "Whitelist":
+            allow = {g.strip().lower() for g in whitelist.split(",") if g.strip()}
+            if allow:
+                su = su[su["Class"].str.lower().isin(allow)]
+
+        # TU + Levelwise (CSV)
         tu = build_tu(t_df)
-        frames=[read_csv_flex_from_bytes(f.read()) for f in (lvl_up or [])]
+        
+        # Recompute total assignments from components (CSV TU)
+        for _c in ["Quiz", "Worksheet", "Prasso", "Reading"]:
+            if _c not in tu.columns:
+                tu[_c] = 0
+        tu["No of Assignments Assigned"] = (
+            pd.to_numeric(tu["Quiz"], errors="coerce").fillna(0).astype(int)
+            + pd.to_numeric(tu["Worksheet"], errors="coerce").fillna(0).astype(int)
+            + pd.to_numeric(tu["Prasso"], errors="coerce").fillna(0).astype(int)
+            + pd.to_numeric(tu["Reading"], errors="coerce").fillna(0).astype(int)
+        )
+
+        frames = [read_csv_flex_from_bytes(f.read()) for f in (lvl_up or [])]
         lv = build_levelwise_with_assignments(
             lesson_frames=frames,
             school_assign_df=st.session_state.get("csv_school_assign_df"),
             logins_df=g_df
         )
 
+        st.session_state["csv_su"] = su
+        st.session_state["csv_tu"] = tu
+        st.session_state["csv_lv"] = lv
 
-        st.session_state["csv_su"]=su; st.session_state["csv_tu"]=tu; st.session_state["csv_lv"]=lv
+    # ...render tables/charts using st.session_state["csv_*"] as you already do...
 
     # previews
     tab1, tab2, tab3, tab4 = st.tabs(["School Usage (SU)","Teacher Usage (TU)","Levelwise","Assignment Summary"])
@@ -1955,28 +2197,27 @@ with tab_csv:
                 tu_view = tu_view[pd.to_numeric(tu_view["No of Lessons Accessed"], errors="coerce").fillna(0).astype(int) > 0]
             if tu_hide_zero_assign_csv and "No of Assignments Assigned" in tu_view.columns:
                 tu_view = tu_view[pd.to_numeric(tu_view["No of Assignments Assigned"], errors="coerce").fillna(0).astype(int) > 0]
+            tu_view = tu_view.drop(
+                columns=["Is Demo teacher", "Is Demo Teacher", "Is Demo"],  # tolerate name variants
+                errors="ignore"
+            )
 
-            center_table(tu, key="tu_tbl_csv")
-            t_opts=[c for c in ["No of Assignments Assigned","No of Lessons Accessed","No of logins"] if c in tu.columns]
-            if t_opts and "Name" in tu.columns:
-                # tm=st.selectbox("Metric", t_opts, key="tu_metric_csv")
-                # by = (tu.groupby("Name")[tm].sum(numeric_only=True).sort_values(ascending=False).head(12)).reset_index()
-                # by[tm]=pd.to_numeric(by[tm], errors="coerce").fillna(0).astype(int)
-                # render_altair(bar_with_labels(by, x="Name", y=tm, horizontal=True, height=460, width=900), "TU chart")
-                # safe, string-only metric selection
-                cols_set = _cols_str_set(tu)
+            center_table(tu_view, key="tu_tbl_csv")
+            t_opts=[c for c in ["No of Assignments Assigned","No of Lessons Accessed","No of logins"] if c in tu_view.columns]
+            if t_opts and "Name" in tu_view.columns:
+                cols_set = _cols_str_set(tu_view)
                 tm_sel = st.selectbox("Metric", t_opts, index=0 if t_opts else None, key="tu_metric_csv")
                 tm = _coerce_metric_key(tm_sel, cols_set)
 
                 if tm:
-                    by = (tu.groupby("Name")[tm].sum(numeric_only=True).sort_values(ascending=False).head(12)).reset_index()
+                    by = (tu_view.groupby("Name")[tm].sum(numeric_only=True).sort_values(ascending=False).head(12)).reset_index()
                     by[tm] = pd.to_numeric(by[tm], errors="coerce").fillna(0).astype(int)
                     render_altair(bar_with_labels(by, x="Name", y=tm, horizontal=True, height=460, width=900), "TU chart")
                 else:
                     st.info("Pick a metric available in TU to draw the chart.")
+            else:
+                st.info("Upload Teachers Usage (optional) and click Build to see TU.")
 
-        else:
-            st.info("Upload Teachers Usage (optional) and click Build to see TU.")
     
     with tab3:
         lv = st.session_state.get("zip_lv", pd.DataFrame())
@@ -2093,27 +2334,93 @@ has_any = any(
     for k in ["zip_su","zip_tu","zip_lv","zip_asr","csv_su","csv_tu","csv_lv","csv_asr"]
 )
 if has_any:
-    st.subheader("Downloads")
-    dl_su  = st.session_state.get("zip_su",  st.session_state.get("csv_su",  pd.DataFrame()))
-    dl_tu  = st.session_state.get("zip_tu",  st.session_state.get("csv_tu",  pd.DataFrame()))
-    dl_lv  = st.session_state.get("zip_lv",  st.session_state.get("csv_lv",  pd.DataFrame()))
-    dl_asr = st.session_state.get("zip_asr", st.session_state.get("csv_asr", pd.DataFrame()))
+    # st.subheader("Downloads")
+    # dl_su  = st.session_state.get("zip_su",  st.session_state.get("csv_su",  pd.DataFrame()))
+    # # Build TU sheet without demo column and with recomputed total
+    # _dl_tu = dl_tu.copy() if isinstance(dl_tu, pd.DataFrame) else pd.DataFrame()
+    # for _c in ["Quiz", "Worksheet", "Prasso", "Reading"]:
+        # if _c not in _dl_tu.columns:
+            # _dl_tu[_c] = 0
+    # _dl_tu["No of Assignments Assigned"] = (
+        # pd.to_numeric(_dl_tu["Quiz"], errors="coerce").fillna(0).astype(int)
+        # + pd.to_numeric(_dl_tu["Worksheet"], errors="coerce").fillna(0).astype(int)
+        # + pd.to_numeric(_dl_tu["Prasso"], errors="coerce").fillna(0).astype(int)
+        # + pd.to_numeric(_dl_tu["Reading"], errors="coerce").fillna(0).astype(int)
+    # )
+    # _dl_tu = _dl_tu.drop(columns=["Is Demo teacher", "Is Demo Teacher", "Is Demo"], errors="ignore")
+    # _dl_tu.to_excel(w, "TU", index=False)
 
-    xbuf=io.BytesIO()
-    with pd.ExcelWriter(xbuf, engine="openpyxl") as w:
-        (dl_su if isinstance(dl_su, pd.DataFrame) else pd.DataFrame()).to_excel(w, "SU", index=False)
-        (dl_tu if isinstance(dl_tu, pd.DataFrame) else pd.DataFrame()).to_excel(w, "TU", index=False)
-        (dl_lv if isinstance(dl_lv, pd.DataFrame) else pd.DataFrame()).to_excel(w, "Levelwise", index=False)
-        (dl_asr if isinstance(dl_asr, pd.DataFrame) else pd.DataFrame()).to_excel(w, "Assignment Summary", index=False)
-    xbuf.seek(0)
-    st.download_button("Download Consolidated xlsx", data=xbuf.getvalue(),
-                       file_name="Consolidated.xlsx",
-                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    # dl_tu  = st.session_state.get("zip_tu",  st.session_state.get("csv_tu",  pd.DataFrame()))
+    # dl_lv  = st.session_state.get("zip_lv",  st.session_state.get("csv_lv",  pd.DataFrame()))
+    # dl_asr = st.session_state.get("zip_asr", st.session_state.get("csv_asr", pd.DataFrame()))
+
+    # xbuf=io.BytesIO()
+    # with pd.ExcelWriter(xbuf, engine="openpyxl") as w:
+        # (dl_su if isinstance(dl_su, pd.DataFrame) else pd.DataFrame()).to_excel(w, "SU", index=False)
+        # (dl_tu if isinstance(dl_tu, pd.DataFrame) else pd.DataFrame()).to_excel(w, "TU", index=False)
+        # (dl_lv if isinstance(dl_lv, pd.DataFrame) else pd.DataFrame()).to_excel(w, "Levelwise", index=False)
+        # (dl_asr if isinstance(dl_asr, pd.DataFrame) else pd.DataFrame()).to_excel(w, "Assignment Summary", index=False)
+    # xbuf.seek(0)
+    # st.download_button("Download Consolidated xlsx", data=xbuf.getvalue(),
+                       # file_name="Consolidated.xlsx",
+                       # mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    # Build TU sheet without demo column and with recomputed total
+    # Gather latest frames for downloads (prefer ZIP, fall back to CSV, else empty)
+    # dl_su  = st.session_state.get("zip_su")  or st.session_state.get("csv_su")  or pd.DataFrame()
+    # dl_tu  = st.session_state.get("zip_tu")  or st.session_state.get("csv_tu")  or pd.DataFrame()
+    # dl_lv  = st.session_state.get("zip_lv")  or st.session_state.get("csv_lv")  or pd.DataFrame()
+    # dl_asr = st.session_state.get("zip_asr") or st.session_state.get("csv_asr") or pd.DataFrame()
+    
+    # --- Ensure download DataFrames exist ---
+    def _pick_df(*candidates):
+        for d in candidates:
+            if isinstance(d, pd.DataFrame) and not d.empty:
+                return d
+        return pd.DataFrame()
+
+    dl_su  = _pick_df(st.session_state.get("zip_su"),  st.session_state.get("csv_su"))
+    dl_tu  = _pick_df(st.session_state.get("zip_tu"),  st.session_state.get("csv_tu"))
+    dl_lv  = _pick_df(st.session_state.get("zip_lv"),  st.session_state.get("csv_lv"))
+    dl_asr = _pick_df(st.session_state.get("zip_asr"), st.session_state.get("csv_asr"))
+
+
+    
+    _dl_tu = dl_tu.copy() if isinstance(dl_tu, pd.DataFrame) else pd.DataFrame()
+    for _c in ["Quiz", "Worksheet", "Prasso", "Reading"]:
+        if _c not in _dl_tu.columns:
+            _dl_tu[_c] = 0
+    _dl_tu["No of Assignments Assigned"] = (
+        pd.to_numeric(_dl_tu["Quiz"], errors="coerce").fillna(0).astype(int)
+        + pd.to_numeric(_dl_tu["Worksheet"], errors="coerce").fillna(0).astype(int)
+        + pd.to_numeric(_dl_tu["Prasso"], errors="coerce").fillna(0).astype(int)
+        + pd.to_numeric(_dl_tu["Reading"], errors="coerce").fillna(0).astype(int)
+    )
+    _dl_tu = _dl_tu.drop(columns=["Is Demo teacher", "Is Demo Teacher", "Is Demo"], errors="ignore")
+    _dl_tu.to_excel(w, "TU", index=False)
 
     c1,c2 = st.columns(2)
     with c1:
         if not dl_su.empty:  st.download_button("Download SU.csv", data=dl_su.to_csv(index=False).encode("utf-8-sig"), file_name="SU.csv")
         if not dl_lv.empty:  st.download_button("Download Levelwise.csv", data=dl_lv.to_csv(index=False).encode("utf-8-sig"), file_name="Levelwise.csv")
     with c2:
-        if not dl_tu.empty:  st.download_button("Download TU.csv", data=dl_tu.to_csv(index=False).encode("utf-8-sig"), file_name="TU.csv")
+        # if not dl_tu.empty:  st.download_button("Download TU.csv", data=dl_tu.to_csv(index=False).encode("utf-8-sig"), file_name="TU.csv")
+        if not dl_tu.empty:
+            _dl_tu_csv = dl_tu.copy()
+            # optional: recompute the total for the global CSV too
+            for _c in ["Quiz","Worksheet","Prasso","Reading"]:
+                if _dl_tu_csv.get(_c) is None:
+                    _dl_tu_csv[_c] = 0
+            _dl_tu_csv["No of Assignments Assigned"] = (
+                pd.to_numeric(_dl_tu_csv["Quiz"], errors="coerce").fillna(0).astype(int)
+                + pd.to_numeric(_dl_tu_csv["Worksheet"], errors="coerce").fillna(0).astype(int)
+                + pd.to_numeric(_dl_tu_csv["Prasso"], errors="coerce").fillna(0).astype(int)
+                + pd.to_numeric(_dl_tu_csv["Reading"], errors="coerce").fillna(0).astype(int)
+            )
+            _dl_tu_csv = _dl_tu_csv.drop(columns=["Is Demo teacher","Is Demo Teacher","Is Demo"], errors="ignore")
+
+            st.download_button("Download TU.csv",
+                               data=_dl_tu_csv.to_csv(index=False).encode("utf-8-sig"),
+                               file_name="TU.csv",  key="dl_tu_csv_global")
+        
+        
         if not dl_asr.empty: st.download_button("Download AssignmentSummary.csv", data=dl_asr.to_csv(index=False).encode("utf-8-sig"), file_name="AssignmentSummary.csv")
