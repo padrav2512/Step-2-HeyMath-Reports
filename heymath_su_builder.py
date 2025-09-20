@@ -173,6 +173,8 @@ def build_consolidated_xlsx_bytes():
           + pd.to_numeric(tu_df.get("Reading", 0), errors="coerce").fillna(0).astype(int)
         )
     tu_df = tu_df.drop(columns=["Is Demo teacher","Is Demo Teacher","Is Demo"], errors="ignore")
+    # Apply the "both are zero" rule to the consolidated TU sheet
+    tu_df = apply_both_zero_filter(tu_df)
 
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
@@ -638,6 +640,19 @@ def detect_files_in_zip(zip_bytes: bytes):
                 teachers_df, names["teachers"]=df, name
 
     return assign_df, lessons_df, logins_df, teachers_df, names
+
+def apply_both_zero_filter(df: pd.DataFrame,
+                           lessons_col="No of Lessons Accessed",
+                           assigns_col="No of Assignments Assigned") -> pd.DataFrame:
+    """Hide rows where BOTH lessons and assignments are zero (tolerant to types)."""
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
+    d = df.copy()
+    if {lessons_col, assigns_col} <= set(d.columns):
+        nla = pd.to_numeric(d[lessons_col], errors="coerce").fillna(0).astype(int)
+        naa = pd.to_numeric(d[assigns_col], errors="coerce").fillna(0).astype(int)
+        d = d[~((nla == 0) & (naa == 0))]
+    return d
 
 # ------------------------ Builders -----------------------------------
 def build_su(a_df, l_df, g_df):
@@ -1958,13 +1973,14 @@ with tab_zip:
             with colf4:
                 search = st.text_input("Filter by teacher name (contains)", value="", key="tu_search")
             # ---------- Zero filters (enabled by default) ----------
-            cza, czb = st.columns([1,1])
-            with cza:
-                hide_zero_lessons = st.checkbox("Hide zero Lessons Accessed", value=True, key="tu_hide_zero_lessons")
-            with czb:
-                hide_zero_assign  = st.checkbox("Hide zero Assignments assigned", value=True, key="tu_hide_zero_assign")
+            # cza, czb = st.columns([1,1])
+            # with cza:
+                # hide_zero_lessons = st.checkbox("Hide zero Lessons Accessed", value=True, key="tu_hide_zero_lessons")
+            # with czb:
+                # hide_zero_assign  = st.checkbox("Hide zero Assignments assigned", value=True, key="tu_hide_zero_assign")
 
-            
+            hide_both_zero = st.checkbox("Both Lesson accessed and Assignments assigned are zero", value=True, key="tu_hide_both_zero")
+
             view = tu.copy()
             # Recompute total assignments from components (ZIP TU view)
             for _c in ["Quiz", "Worksheet", "Prasso", "Reading"]:
@@ -1995,11 +2011,16 @@ with tab_zip:
                 view = view[view["Name"].astype(str).str.lower().str.contains(s)]
                 
             # apply the zero filters to the same 'view' df that drives both table and chart
-            if hide_zero_lessons and "No of Lessons Accessed" in view.columns:
-                view = view[pd.to_numeric(view["No of Lessons Accessed"], errors="coerce").fillna(0).astype(int) > 0]
+            # if hide_zero_lessons and "No of Lessons Accessed" in view.columns:
+                # view = view[pd.to_numeric(view["No of Lessons Accessed"], errors="coerce").fillna(0).astype(int) > 0]
 
-            if hide_zero_assign and "No of Assignments Assigned" in view.columns:
-                view = view[pd.to_numeric(view["No of Assignments Assigned"], errors="coerce").fillna(0).astype(int) > 0]
+            # if hide_zero_assign and "No of Assignments Assigned" in view.columns:
+                # view = view[pd.to_numeric(view["No of Assignments Assigned"], errors="coerce").fillna(0).astype(int) > 0]
+            # Ensure tu_view always exists, even if tu is empty
+            tu_view = tu.copy() if isinstance(tu, pd.DataFrame) else pd.DataFrame()
+            if hide_both_zero and not tu_view.empty:
+                tu_view = tu_view[~((tu_view["No of Lessons Accessed"] == 0) & 
+                                    (tu_view["No of Assignments Assigned"] == 0))]
 
             # (2) Apply Active: minimum total activity from the ZIP controls to TU as well:
            
@@ -2507,31 +2528,58 @@ with tab_csv:
                 render_altair(bar_with_labels(topn, x="Class", y=m, height=360, width=900), "SU chart")
         else:
             st.info("Upload core CSVs and click Build to see SU.")
-
     with tab2:
+        # Ensure tu_view exists
+        tu_view = tu.copy() if isinstance(tu, pd.DataFrame) else pd.DataFrame()
+
         if not tu.empty:
-            # --- TU (CSV) zero filters ---
-            cz1, cz2 = st.columns([1,1])
-            with cz1:
-                tu_hide_zero_lessons_csv = st.checkbox(
-                    "Hide zero Lessons Accessed", value=True, key="tu_hide_zero_lessons_csv"
-                )
-            with cz2:
-                tu_hide_zero_assign_csv = st.checkbox(
-                    "Hide zero Assignments assigned", value=True, key="tu_hide_zero_assign_csv"
-                )
+            hide_both_zero = st.checkbox("Both are zero", value=True, key="tu_hide_both_zero_csv")
 
             tu_view = tu.copy()
-            if tu_hide_zero_lessons_csv and "No of Lessons Accessed" in tu_view.columns:
-                tu_view = tu_view[pd.to_numeric(tu_view["No of Lessons Accessed"], errors="coerce").fillna(0).astype(int) > 0]
-            if tu_hide_zero_assign_csv and "No of Assignments Assigned" in tu_view.columns:
-                tu_view = tu_view[pd.to_numeric(tu_view["No of Assignments Assigned"], errors="coerce").fillna(0).astype(int) > 0]
-            tu_view = tu_view.drop(
-                columns=["Is Demo teacher", "Is Demo Teacher", "Is Demo"],  # tolerate name variants
-                errors="ignore"
-            )
+            tu_view = tu_view.drop(columns=["Is Demo teacher", "Is Demo Teacher", "Is Demo"], errors="ignore")
 
-            center_table(tu_view, key="tu_tbl_csv")
+            # Apply the combined filter to the table (and reuse the same 'tu_view' for charts)
+            if hide_both_zero:
+                tu_view = apply_both_zero_filter(tu_view)
+
+            # --- render your table ---
+            if not tu_view.empty:
+                center_table(tu_view, key="tu_tbl_csv")
+
+            # --- example: if you render charts from TU, feed tu_view directly ---
+            # chart_df = tu_view  # already filtered if checkbox is on
+            # render_altair(bar_with_labels(chart_df, x="Name", y="No of Assignments Assigned", title="Assignments by teacher"))
+
+    # with tab2:
+        # # if not tu.empty:
+            # # # --- TU (CSV) zero filters ---
+            # # cz1, cz2 = st.columns([1,1])
+            # # with cz1:
+                # # tu_hide_zero_lessons_csv = st.checkbox(
+                    # # "Hide zero Lessons Accessed", value=True, key="tu_hide_zero_lessons_csv"
+                # # )
+            # # with cz2:
+                # # tu_hide_zero_assign_csv = st.checkbox(
+                    # # "Hide zero Assignments assigned", value=True, key="tu_hide_zero_assign_csv"
+                # # )
+        # # Ensure tu_view always exists, even if tu is empty
+        # tu_view = tu.copy() if isinstance(tu, pd.DataFrame) else pd.DataFrame()        
+        # if not tu.empty:
+            # # --- TU (CSV) zero filter ---
+            # hide_both_zero = st.checkbox(
+                # "Both are zero", value=True, key="tu_hide_both_zero_csv"
+            # )
+            # tu_view = tu.copy()
+            # if tu_hide_zero_lessons_csv and "No of Lessons Accessed" in tu_view.columns:
+                # tu_view = tu_view[pd.to_numeric(tu_view["No of Lessons Accessed"], errors="coerce").fillna(0).astype(int) > 0]
+            # if tu_hide_zero_assign_csv and "No of Assignments Assigned" in tu_view.columns:
+                # tu_view = tu_view[pd.to_numeric(tu_view["No of Assignments Assigned"], errors="coerce").fillna(0).astype(int) > 0]
+            # tu_view = tu_view.drop(
+                # columns=["Is Demo teacher", "Is Demo Teacher", "Is Demo"],  # tolerate name variants
+                # errors="ignore"
+            # )
+
+            # center_table(tu_view, key="tu_tbl_csv")
             t_opts=[c for c in ["No of Assignments Assigned","No of Lessons Accessed","No of logins"] if c in tu_view.columns]
             if t_opts and "Name" in tu_view.columns:
                 cols_set = _cols_str_set(tu_view)
@@ -2657,3 +2705,99 @@ with tab_csv:
         else:
             st.info("Upload School Assignments Usage + Teacher Quiz Assignment CSVs to build Assignment Summary.")
 
+# ------------------------ Downloads (only if data exists) ------------
+# has_any = any(
+    # isinstance(st.session_state.get(k), pd.DataFrame) and not st.session_state[k].empty
+    # for k in ["zip_su","zip_tu","zip_lv","zip_asr","csv_su","csv_tu","csv_lv","csv_asr"]
+# )
+# if has_any:
+    # st.subheader("Downloads")
+    # dl_su  = st.session_state.get("zip_su",  st.session_state.get("csv_su",  pd.DataFrame()))
+    # # Build TU sheet without demo column and with recomputed total
+    # _dl_tu = dl_tu.copy() if isinstance(dl_tu, pd.DataFrame) else pd.DataFrame()
+    # for _c in ["Quiz", "Worksheet", "Prasso", "Reading"]:
+        # if _c not in _dl_tu.columns:
+            # _dl_tu[_c] = 0
+    # _dl_tu["No of Assignments Assigned"] = (
+        # pd.to_numeric(_dl_tu["Quiz"], errors="coerce").fillna(0).astype(int)
+        # + pd.to_numeric(_dl_tu["Worksheet"], errors="coerce").fillna(0).astype(int)
+        # + pd.to_numeric(_dl_tu["Prasso"], errors="coerce").fillna(0).astype(int)
+        # + pd.to_numeric(_dl_tu["Reading"], errors="coerce").fillna(0).astype(int)
+    # )
+    # _dl_tu = _dl_tu.drop(columns=["Is Demo teacher", "Is Demo Teacher", "Is Demo"], errors="ignore")
+    # _dl_tu.to_excel(w, "TU", index=False)
+
+    # dl_tu  = st.session_state.get("zip_tu",  st.session_state.get("csv_tu",  pd.DataFrame()))
+    # dl_lv  = st.session_state.get("zip_lv",  st.session_state.get("csv_lv",  pd.DataFrame()))
+    # dl_asr = st.session_state.get("zip_asr", st.session_state.get("csv_asr", pd.DataFrame()))
+
+    # xbuf=io.BytesIO()
+    # with pd.ExcelWriter(xbuf, engine="openpyxl") as w:
+        # (dl_su if isinstance(dl_su, pd.DataFrame) else pd.DataFrame()).to_excel(w, "SU", index=False)
+        # (dl_tu if isinstance(dl_tu, pd.DataFrame) else pd.DataFrame()).to_excel(w, "TU", index=False)
+        # (dl_lv if isinstance(dl_lv, pd.DataFrame) else pd.DataFrame()).to_excel(w, "Levelwise", index=False)
+        # (dl_asr if isinstance(dl_asr, pd.DataFrame) else pd.DataFrame()).to_excel(w, "Assignment Summary", index=False)
+    # xbuf.seek(0)
+    # st.download_button("Download Consolidated xlsx", data=xbuf.getvalue(),
+                       # file_name="Consolidated.xlsx",
+                       # mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    # Build TU sheet without demo column and with recomputed total
+    # Gather latest frames for downloads (prefer ZIP, fall back to CSV, else empty)
+    # dl_su  = st.session_state.get("zip_su")  or st.session_state.get("csv_su")  or pd.DataFrame()
+    # dl_tu  = st.session_state.get("zip_tu")  or st.session_state.get("csv_tu")  or pd.DataFrame()
+    # dl_lv  = st.session_state.get("zip_lv")  or st.session_state.get("csv_lv")  or pd.DataFrame()
+    # dl_asr = st.session_state.get("zip_asr") or st.session_state.get("csv_asr") or pd.DataFrame()
+    
+    # --- Ensure download DataFrames exist ---
+    # def _pick_df(*candidates):
+        # for d in candidates:
+            # if isinstance(d, pd.DataFrame) and not d.empty:
+                # return d
+        # return pd.DataFrame()
+
+    # dl_su  = _pick_df(st.session_state.get("zip_su"),  st.session_state.get("csv_su"))
+    # dl_tu  = _pick_df(st.session_state.get("zip_tu"),  st.session_state.get("csv_tu"))
+    # dl_lv  = _pick_df(st.session_state.get("zip_lv"),  st.session_state.get("csv_lv"))
+    # dl_asr = _pick_df(st.session_state.get("zip_asr"), st.session_state.get("csv_asr"))
+
+
+    
+    # _dl_tu = dl_tu.copy() if isinstance(dl_tu, pd.DataFrame) else pd.DataFrame()
+    # for _c in ["Quiz", "Worksheet", "Prasso", "Reading"]:
+        # if _c not in _dl_tu.columns:
+            # _dl_tu[_c] = 0
+    # _dl_tu["No of Assignments Assigned"] = (
+        # pd.to_numeric(_dl_tu["Quiz"], errors="coerce").fillna(0).astype(int)
+        # + pd.to_numeric(_dl_tu["Worksheet"], errors="coerce").fillna(0).astype(int)
+        # + pd.to_numeric(_dl_tu["Prasso"], errors="coerce").fillna(0).astype(int)
+        # + pd.to_numeric(_dl_tu["Reading"], errors="coerce").fillna(0).astype(int)
+    # )
+    # _dl_tu = _dl_tu.drop(columns=["Is Demo teacher", "Is Demo Teacher", "Is Demo"], errors="ignore")
+    # _dl_tu.to_excel(w, "TU", index=False)
+
+    # c1,c2 = st.columns(2)
+    # with c1:
+        # if not dl_su.empty:  st.download_button("Download SU.csv", data=dl_su.to_csv(index=False).encode("utf-8-sig"), file_name="SU.csv")
+        # if not dl_lv.empty:  st.download_button("Download Levelwise.csv", data=dl_lv.to_csv(index=False).encode("utf-8-sig"), file_name="Levelwise.csv")
+    # with c2:
+        # # if not dl_tu.empty:  st.download_button("Download TU.csv", data=dl_tu.to_csv(index=False).encode("utf-8-sig"), file_name="TU.csv")
+        # if not dl_tu.empty:
+            # _dl_tu_csv = dl_tu.copy()
+            # # optional: recompute the total for the global CSV too
+            # for _c in ["Quiz","Worksheet","Prasso","Reading"]:
+                # if _dl_tu_csv.get(_c) is None:
+                    # _dl_tu_csv[_c] = 0
+            # _dl_tu_csv["No of Assignments Assigned"] = (
+                # pd.to_numeric(_dl_tu_csv["Quiz"], errors="coerce").fillna(0).astype(int)
+                # + pd.to_numeric(_dl_tu_csv["Worksheet"], errors="coerce").fillna(0).astype(int)
+                # + pd.to_numeric(_dl_tu_csv["Prasso"], errors="coerce").fillna(0).astype(int)
+                # + pd.to_numeric(_dl_tu_csv["Reading"], errors="coerce").fillna(0).astype(int)
+            # )
+            # _dl_tu_csv = _dl_tu_csv.drop(columns=["Is Demo teacher","Is Demo Teacher","Is Demo"], errors="ignore")
+
+            # st.download_button("Download TU.csv",
+                               # data=_dl_tu_csv.to_csv(index=False).encode("utf-8-sig"),
+                               # file_name="TU.csv",  key="dl_tu_csv_global")
+        
+        
+        # if not dl_asr.empty: st.download_button("Download AssignmentSummary.csv", data=dl_asr.to_csv(index=False).encode("utf-8-sig"), file_name="AssignmentSummary.csv")
