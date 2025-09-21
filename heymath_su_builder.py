@@ -1979,7 +1979,7 @@ with tab_zip:
             # with czb:
                 # hide_zero_assign  = st.checkbox("Hide zero Assignments assigned", value=True, key="tu_hide_zero_assign")
 
-            hide_both_zero = st.checkbox("Both Lesson accessed and Assignments assigned are zero", value=True, key="tu_hide_both_zero")
+            hide_both_zero = st.checkbox("Hide when Lessons accessed and Assignments assigned are both zero", value=True, key="tu_hide_both_zero")
 
             view = tu.copy()
             # Recompute total assignments from components (ZIP TU view)
@@ -2016,11 +2016,10 @@ with tab_zip:
 
             # if hide_zero_assign and "No of Assignments Assigned" in view.columns:
                 # view = view[pd.to_numeric(view["No of Assignments Assigned"], errors="coerce").fillna(0).astype(int) > 0]
-            # Ensure tu_view always exists, even if tu is empty
-            tu_view = tu.copy() if isinstance(tu, pd.DataFrame) else pd.DataFrame()
-            if hide_both_zero and not tu_view.empty:
-                tu_view = tu_view[~((tu_view["No of Lessons Accessed"] == 0) & 
-                                    (tu_view["No of Assignments Assigned"] == 0))]
+            # Apply the “both zero” filter directly to the DataFrame that drives the UI
+            if hide_both_zero and isinstance(view, pd.DataFrame) and not view.empty:
+                view = apply_both_zero_filter(view)
+
 
             # (2) Apply Active: minimum total activity from the ZIP controls to TU as well:
            
